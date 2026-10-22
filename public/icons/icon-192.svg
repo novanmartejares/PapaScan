@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="laser" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="rgba(56, 189, 248, 0)"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="rgba(56, 189, 248, 0)"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="40" fill="url(#bg)"/>
+  
+  <!-- Viewfinder corners -->
+  <path d="M 40 60 L 40 44 A 4 4 0 0 1 44 40 L 60 40" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M 152 60 L 152 44 A 4 4 0 0 0 148 40 L 132 40" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M 40 132 L 40 148 A 4 4 0 0 0 44 152 L 60 152" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M 152 132 L 152 148 A 4 4 0 0 1 148 152 L 132 152" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" fill="none"/>
+
+  <!-- Document Sheet -->
+  <rect x="56" y="52" width="80" height="96" rx="8" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+  
+  <!-- Document Lines -->
+  <rect x="68" y="70" width="45" height="5" rx="2.5" fill="#38bdf8"/>
+  <rect x="68" y="84" width="56" height="4" rx="2" fill="#64748b"/>
+  <rect x="68" y="96" width="56" height="4" rx="2" fill="#64748b"/>
+  <rect x="68" y="108" width="38" height="4" rx="2" fill="#64748b"/>
+  <rect x="68" y="120" width="48" height="4" rx="2" fill="#64748b"/>
+
+  <!-- Laser Beam -->
+  <line x1="48" y1="92" x2="144" y2="92" stroke="url(#laser)" stroke-width="4"/>
+  <circle cx="96" cy="92" r="3" fill="#38bdf8"/>
+</svg>
