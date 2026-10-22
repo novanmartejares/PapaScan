@@ -31,12 +31,12 @@ export const Header: React.FC<HeaderProps> = ({
             <ScanLine className="w-5 h-5 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
                 {viewTitle}
               </span>
-              <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                PWA
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                CamScanner Pro
               </span>
             </div>
             <p className="text-[11px] text-slate-400 font-medium">by Novan • Smart Scanner</p>

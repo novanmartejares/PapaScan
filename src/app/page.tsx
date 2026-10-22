@@ -7,6 +7,7 @@ import {
   DocumentCategory,
   ViewMode,
   FilterType,
+  CaptureMode,
 } from '@/types';
 import {
   initDatabase,
@@ -27,6 +28,7 @@ import { SettingsModal } from '@/components/common/SettingsModal';
 import { SearchBar } from '@/components/library/SearchBar';
 import { DocumentFilter } from '@/components/library/DocumentFilter';
 import { DocumentCard } from '@/components/library/DocumentCard';
+import { CamScannerToolsHub } from '@/components/library/CamScannerToolsHub';
 import { EmptyState } from '@/components/library/EmptyState';
 import { CameraModal } from '@/components/scanner/CameraModal';
 import { CropEditorModal } from '@/components/editor/CropEditorModal';
@@ -48,6 +50,7 @@ export default function HomePage() {
 
   // Modals state
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [initialCameraMode, setInitialCameraMode] = useState<CaptureMode>('single');
   const [isCropEditorOpen, setIsCropEditorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileSyncOpen, setIsMobileSyncOpen] = useState(false);
@@ -305,6 +308,73 @@ export default function HomePage() {
     }
   };
 
+  // CamScanner Pro Suite Quick Actions
+  const handleOpenSmartScan = () => {
+    setTargetDocIdForAppend(null);
+    setInitialCameraMode('single');
+    setIsCameraOpen(true);
+  };
+
+  const handleOpenIdCardScan = () => {
+    setTargetDocIdForAppend(null);
+    setInitialCameraMode('id_card');
+    setIsCameraOpen(true);
+  };
+
+  const handleOpenWatermark = () => {
+    if (documents.length > 0) {
+      setActiveDocumentId(documents[0].id);
+      setViewMode('detail');
+      showToast('Tap "Watermark" in the CamScanner Pro bar below', 'info');
+    } else {
+      handleTriggerUpload();
+    }
+  };
+
+  const handleOpenRedaction = () => {
+    if (documents.length > 0) {
+      setActiveDocumentId(documents[0].id);
+      setViewMode('detail');
+      showToast('Tap "Redact" in the CamScanner Pro bar below', 'info');
+    } else {
+      handleTriggerUpload();
+    }
+  };
+
+  const handleOpenSignature = () => {
+    if (documents.length > 0) {
+      setActiveDocumentId(documents[0].id);
+      setViewMode('detail');
+      showToast('Tap "Sign" in the CamScanner Pro bar below', 'info');
+    } else {
+      handleTriggerUpload();
+    }
+  };
+
+  const handleOpenOCR = () => {
+    if (documents.length > 0) {
+      setActiveDocumentId(documents[0].id);
+      setViewMode('detail');
+      showToast('Tap "Extract Text (OCR)" tab for 1-click .TXT export', 'info');
+    } else {
+      handleTriggerUpload();
+    }
+  };
+
+  const handleOpenNoShadow = () => {
+    if (documents.length > 0 && documents[0].pages[0]) {
+      const page = documents[0].pages[0];
+      setTargetDocIdForAppend(documents[0].id);
+      setEditingPageIndex(0);
+      setPendingRawImages([page.originalImageUrl]);
+      setDefaultFilter('noshadow');
+      setIsCropEditorOpen(true);
+      showToast('CamScanner "No Shadow" filter applied', 'info');
+    } else {
+      handleTriggerUpload();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col selection:bg-sky-500 selection:text-white">
       {/* Toast notifications */}
@@ -374,6 +444,17 @@ export default function HomePage() {
                   />
                 </div>
               )}
+
+              {/* CamScanner Pro Suite Feature Hub */}
+              <CamScannerToolsHub
+                onOpenSmartScan={handleOpenSmartScan}
+                onOpenIdCardScan={handleOpenIdCardScan}
+                onOpenWatermark={handleOpenWatermark}
+                onOpenRedaction={handleOpenRedaction}
+                onOpenSignature={handleOpenSignature}
+                onOpenOCR={handleOpenOCR}
+                onOpenNoShadow={handleOpenNoShadow}
+              />
 
               {/* Category Pills (Mobile & Tablet) */}
               <div className="md:hidden">
@@ -470,6 +551,7 @@ export default function HomePage() {
           setTargetDocIdForAppend(null);
         }}
         onCaptureComplete={handleCaptureComplete}
+        initialCaptureMode={initialCameraMode}
       />
 
       {/* Interactive 4-Point Crop & Filter Editor */}

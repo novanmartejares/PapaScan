@@ -110,13 +110,13 @@ export const ViewfinderOverlay: React.FC<ViewfinderOverlayProps> = ({
         </div>
 
         {/* Smart Document Detected floating pill badge */}
-        {hasDetected && (
+        {hasDetected ? (
           <div className="absolute top-3 inset-x-0 flex justify-center">
             <div
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full backdrop-blur-md border shadow-lg transition-colors ${
                 autoCapture && autoCaptureProgress > 0
-                  ? 'bg-emerald-950/85 border-emerald-400/60 text-emerald-300'
-                  : 'bg-slate-950/85 border-amber-400/60 text-amber-300'
+                  ? 'bg-emerald-950/90 border-emerald-400 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
+                  : 'bg-slate-950/90 border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.4)]'
               }`}
             >
               <span
@@ -126,11 +126,20 @@ export const ViewfinderOverlay: React.FC<ViewfinderOverlayProps> = ({
               />
               <span className="text-[11px] font-bold">
                 {autoCapture && autoCaptureProgress > 0
-                  ? `Auto-Capturing (${autoCaptureProgress}%)`
-                  : 'Document Detected • Auto-Edge Active'}
+                  ? `⚡ CamScanner Auto-Snap (${autoCaptureProgress}%)`
+                  : '⚡ CamScanner AI: Document Locked'}
               </span>
             </div>
           </div>
+        ) : (
+          !isIdCard && (
+            <div className="absolute top-3 inset-x-0 flex justify-center">
+              <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-slate-300 text-[10px] font-semibold">
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>CamScanner Smart Scan Active</span>
+              </div>
+            </div>
+          )
         )}
 
         {/* ID Card watermark badge inside viewfinder */}

@@ -26,12 +26,14 @@ interface CameraModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCaptureComplete: (images: string[]) => void;
+  initialCaptureMode?: CaptureMode;
 }
 
 export const CameraModal: React.FC<CameraModalProps> = ({
   isOpen,
   onClose,
   onCaptureComplete,
+  initialCaptureMode = 'single',
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -43,7 +45,16 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   const [torchOn, setTorchOn] = useState(false);
 
   // Capture mode: single, batch, or id_card
-  const [captureMode, setCaptureMode] = useState<CaptureMode>('single');
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(initialCaptureMode);
+
+  // Sync initialCaptureMode when opening
+  useEffect(() => {
+    if (isOpen) {
+      setCaptureMode(initialCaptureMode);
+      setIdCardStep('front');
+      setIdFrontImage(null);
+    }
+  }, [isOpen, initialCaptureMode]);
   const [batchItems, setBatchItems] = useState<ScanBatchItem[]>([]);
 
   // ID Card 2-sided state

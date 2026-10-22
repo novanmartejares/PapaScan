@@ -293,50 +293,59 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
             </div>
 
             {/* CamScanner Pro Document Tools Bar */}
-            <div className="w-full max-w-md flex items-center justify-between gap-1.5 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl overflow-x-auto">
-              <button
-                onClick={() => setIsSignatureModalOpen(true)}
-                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
-                title="Add digital transparent signature"
-              >
-                <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400">
-                  <PenTool className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] font-bold">Sign</span>
-              </button>
+            <div className="w-full max-w-md space-y-1.5">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  CamScanner Pro Tools
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">Instant AI Editing</span>
+              </div>
+              <div className="w-full flex items-center justify-between gap-1.5 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl overflow-x-auto">
+                <button
+                  onClick={() => setIsSignatureModalOpen(true)}
+                  className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                  title="Add digital transparent signature"
+                >
+                  <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400">
+                    <PenTool className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold">Sign</span>
+                </button>
 
-              <button
-                onClick={() => setIsWatermarkModalOpen(true)}
-                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
-                title="Apply confidential or security watermark"
-              >
-                <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] font-bold">Watermark</span>
-              </button>
+                <button
+                  onClick={() => setIsWatermarkModalOpen(true)}
+                  className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                  title="Apply confidential or security watermark"
+                >
+                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold">Watermark</span>
+                </button>
 
-              <button
-                onClick={() => setIsRedactionModalOpen(true)}
-                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
-                title="Redact or whiteout sensitive information"
-              >
-                <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400">
-                  <Eraser className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] font-bold">Redact</span>
-              </button>
+                <button
+                  onClick={() => setIsRedactionModalOpen(true)}
+                  className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                  title="Redact or whiteout sensitive information"
+                >
+                  <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400">
+                    <Eraser className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold">Redact</span>
+                </button>
 
-              <button
-                onClick={() => onEditPageCrop(activePageIndex)}
-                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
-                title="Crop, rotate, and apply lighting filters"
-              >
-                <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
-                  <Crop className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] font-bold">Crop / Filter</span>
-              </button>
+                <button
+                  onClick={() => onEditPageCrop(activePageIndex)}
+                  className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                  title="Crop, rotate, and apply lighting filters"
+                >
+                  <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
+                    <Crop className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold">Crop / Filter</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
