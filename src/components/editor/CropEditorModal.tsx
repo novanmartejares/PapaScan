@@ -12,9 +12,11 @@ import {
   FileText,
   Square,
   Smartphone,
+  Sparkles,
 } from 'lucide-react';
 import { RectCrop, FilterType, ScannedPage, AspectRatioType } from '@/types';
 import { getDefaultRectCrop, rotateRectCrop, cropToCorners } from '@/lib/cv/geometry';
+import { detectDocumentBounds } from '@/lib/cv/document-detector';
 import { applyFilter, rotateCanvas } from '@/lib/cv/filters';
 import { CropCanvas } from './CropCanvas';
 import { FilterBar } from './FilterBar';
@@ -38,6 +40,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
   const [currentFilter, setCurrentFilter] = useState<FilterType>(initialFilter);
   const [rotation, setRotation] = useState<number>(0);
   const [selectedRatio, setSelectedRatio] = useState<AspectRatioType>('free');
+  const [smartDetected, setSmartDetected] = useState(false);
 
   const [crop, setCrop] = useState<RectCrop>({
     x: 0,
@@ -54,7 +57,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const processedPagesRef = useRef<ScannedPage[]>([]);
 
-  // When image loads or index changes, compute default rectangular crop box
+  // When image loads or index changes, automatically run Smart Document Edge Detection
   useEffect(() => {
     if (!isOpen || rawImages.length === 0) return;
 
@@ -65,8 +68,18 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setImgDimensions({ width: img.width, height: img.height });
-      const defaultCrop = getDefaultRectCrop(img.width, img.height, 0.04);
-      setCrop(defaultCrop);
+
+      // Smart Document Shoot Edge Detection
+      const detection = detectDocumentBounds(img);
+      if (detection.isDocumentDetected) {
+        setCrop(detection.rect);
+        setSmartDetected(true);
+      } else {
+        const defaultCrop = getDefaultRectCrop(img.width, img.height, 0.04);
+        setCrop(defaultCrop);
+        setSmartDetected(false);
+      }
+
       setRotation(0);
       setCurrentFilter(initialFilter);
       setSelectedRatio('free');
@@ -78,6 +91,24 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
 
   const currentImgSrc = rawImages[currentIdx];
   const isLastImage = currentIdx === rawImages.length - 1;
+
+  // Manual Trigger: Re-run Smart Document Detection to snap to paper edges
+  const handleSmartAutoDetect = () => {
+    if (!currentImgSrc) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const detection = detectDocumentBounds(img);
+      setCrop(detection.rect);
+      setSmartDetected(true);
+      setSelectedRatio('free');
+
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(30);
+      }
+    };
+    img.src = currentImgSrc;
+  };
 
   // Aspect ratio multiplier (width / height)
   const getNumericAspectRatio = (): number | null => {
@@ -166,9 +197,10 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
       width: imgDimensions.width,
       height: imgDimensions.height,
     });
+    setSmartDetected(false);
   };
 
-  // Apply basic rectangular crop & selected filter, then save
+  // Apply crop & filter, saving only the scanned document
   const handleApply = async () => {
     setIsProcessing(true);
 
@@ -181,7 +213,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
         img.src = currentImgSrc;
       });
 
-      // 1. Direct rectangular crop
+      // 1. Direct rectangular crop of the document paper
       const safeCropX = Math.max(0, Math.min(img.width - 20, Math.round(crop.x)));
       const safeCropY = Math.max(0, Math.min(img.height - 20, Math.round(crop.y)));
       const safeCropW = Math.max(20, Math.min(img.width - safeCropX, Math.round(crop.width)));
@@ -273,8 +305,17 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Quick Aspect Ratio Presets */}
+        {/* Quick Aspect Ratio Presets & Smart Auto-Detect Button */}
         <div className="flex items-center gap-1 p-1 rounded-full bg-slate-900 border border-slate-800">
+          <button
+            onClick={handleSmartAutoDetect}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 active:scale-95 shadow-sm"
+            title="Smart Edge Detection: Automatically snap to paper boundaries"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Auto-Detect</span>
+          </button>
+
           <button
             onClick={() => handleSelectRatio('free')}
             className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
@@ -356,11 +397,18 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
           aspectRatio={getNumericAspectRatio()}
         />
 
-        {/* Intuitive Instruction Hint */}
-        <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none">
-          <span className="px-3.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] text-slate-200 border border-white/10 shadow-lg">
-            Drag corners or edges to crop • Drag inside box to move
-          </span>
+        {/* Smart Document Detection Pill */}
+        <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none z-10">
+          {smartDetected ? (
+            <span className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-900/90 backdrop-blur-md text-[11px] font-semibold text-amber-300 border border-amber-500/40 shadow-xl animate-in fade-in">
+              <Sparkles className="w-3 h-3 text-amber-400" />
+              <span>Smart Document Detected • Table & background trimmed</span>
+            </span>
+          ) : (
+            <span className="px-3.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] text-slate-200 border border-white/10 shadow-lg">
+              Drag corners or edges to crop • Tap Auto-Detect to re-snap
+            </span>
+          )}
         </div>
       </div>
 
@@ -393,7 +441,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
             ) : isLastImage ? (
               <>
                 <Check className="w-4 h-4" />
-                <span>Save Document</span>
+                <span>Save Scanned Document</span>
               </>
             ) : (
               <>

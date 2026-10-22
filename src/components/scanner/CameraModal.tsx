@@ -12,9 +12,11 @@ import {
   CreditCard,
   Loader2,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { ScanBatchItem, CaptureMode } from '@/types';
 import { compositeIDCardsToA4Page } from '@/lib/cv/id-compositor';
+import { detectDocumentBounds } from '@/lib/cv/document-detector';
 import { ViewfinderOverlay } from './ViewfinderOverlay';
 import { BatchTray } from './BatchTray';
 import { FileUploadDropzone } from './FileUploadDropzone';
@@ -46,6 +48,10 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   // ID Card 2-sided state
   const [idCardStep, setIdCardStep] = useState<'front' | 'back' | 'compositing'>('front');
   const [idFrontImage, setIdFrontImage] = useState<string | null>(null);
+
+  // Smart Document Shoot state
+  const [smartShootEnabled, setSmartShootEnabled] = useState(true);
+  const [isDocumentDetected, setIsDocumentDetected] = useState(false);
 
   // Tab: camera vs upload
   const [tab, setTab] = useState<'camera' | 'upload'>('camera');
@@ -112,6 +118,30 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       }
     };
   }, [isOpen, tab, startCamera]);
+
+  // Real-time live document edge detection on video stream (Document Shoot mode)
+  useEffect(() => {
+    if (!cameraActive || !videoRef.current || tab !== 'camera' || !smartShootEnabled) {
+      setIsDocumentDetected(false);
+      return;
+    }
+
+    const video = videoRef.current;
+    let intervalId: NodeJS.Timeout;
+
+    intervalId = setInterval(() => {
+      if (video.readyState >= 2 && video.videoWidth > 40) {
+        try {
+          const detection = detectDocumentBounds(video);
+          setIsDocumentDetected(detection.isDocumentDetected);
+        } catch {
+          // Ignore transient capture hiccups
+        }
+      }
+    }, 320);
+
+    return () => clearInterval(intervalId);
+  }, [cameraActive, tab, smartShootEnabled]);
 
   // Reset ID card state when switching modes
   const handleSelectMode = (mode: CaptureMode) => {
@@ -291,27 +321,43 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         </div>
 
         {/* Quick controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* Smart Document Shoot Toggle */}
+          {captureMode !== 'id_card' && (
+            <button
+              onClick={() => setSmartShootEnabled((prev) => !prev)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold transition-all ${
+                smartShootEnabled
+                  ? 'bg-amber-500/25 border-amber-400/80 text-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.3)]'
+                  : 'bg-black/50 border-white/10 text-white/50'
+              }`}
+              title="Toggle Smart Document Shoot Edge Detection"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Doc Shoot</span>
+            </button>
+          )}
+
           {torchSupported && (
             <button
               onClick={toggleTorch}
-              className={`p-2.5 rounded-full backdrop-blur-md border transition-colors ${
+              className={`p-2 rounded-full backdrop-blur-md border transition-colors ${
                 torchOn
                   ? 'bg-amber-400 text-black border-amber-300'
                   : 'bg-black/50 text-white/90 border-white/10'
               }`}
               title="Torch"
             >
-              <Flashlight className="w-5 h-5" />
+              <Flashlight className="w-4 h-4" />
             </button>
           )}
 
           <button
             onClick={toggleFacingMode}
-            className="p-2.5 rounded-full bg-black/50 backdrop-blur-md text-white/90 hover:text-white border border-white/10 transition-colors"
+            className="p-2 rounded-full bg-black/50 backdrop-blur-md text-white/90 hover:text-white border border-white/10 transition-colors"
             title="Flip camera"
           >
-            <SwitchCamera className="w-5 h-5" />
+            <SwitchCamera className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -331,6 +377,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             {/* Viewfinder overlay */}
             <ViewfinderOverlay
               aspectRatio={captureMode === 'id_card' ? 'id_card' : 'document'}
+              isDocumentDetected={isDocumentDetected}
+              smartShootEnabled={smartShootEnabled}
               stepBadge={
                 captureMode === 'id_card'
                   ? idCardStep === 'front'
@@ -347,7 +395,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
                     : idCardStep === 'back'
                     ? 'FLIP CARD OVER! Position BACK of card & tap shutter'
                     : 'Compositing both sides onto single A4 sheet...'
-                  : 'Align document inside the frame & hold steady'
+                  : undefined
               }
             />
 
