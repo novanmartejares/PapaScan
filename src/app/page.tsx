@@ -174,8 +174,12 @@ export default function HomePage() {
       if (existingDoc) {
         let updatedPages = [...existingDoc.pages];
         if (editingPageIndex !== null && newPages.length === 1) {
-          // Replace single edited page
-          updatedPages[editingPageIndex] = newPages[0];
+          // Replace single edited page while preserving existing OCR text
+          const prevOcr = updatedPages[editingPageIndex]?.ocrText;
+          updatedPages[editingPageIndex] = {
+            ...newPages[0],
+            ocrText: newPages[0].ocrText || prevOcr,
+          };
         } else {
           // Append new pages
           updatedPages = [...updatedPages, ...newPages];

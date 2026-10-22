@@ -223,12 +223,121 @@ export function applyGrayscale(source: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 /**
+ * CamScanner Signature "No Shadow" (Shadow Removal & Illumination Equalizer)
+ * Estimates 2D background paper illumination surface and normalizes local lighting,
+ * eliminating harsh phone, hand, and ceiling lamp shadows while preserving ink & stamps.
+ */
+export function applyNoShadow(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = cloneCanvas(source);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return source;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // 1. Grid-based local paper background estimation (16x16 blocks)
+  const BLOCK_SIZE = Math.max(16, Math.min(48, Math.round(Math.min(w, h) / 20)));
+  const gridCols = Math.ceil(w / BLOCK_SIZE);
+  const gridRows = Math.ceil(h / BLOCK_SIZE);
+  const bgGrid = new Float32Array(gridCols * gridRows);
+
+  for (let gy = 0; gy < gridRows; gy++) {
+    const yStart = gy * BLOCK_SIZE;
+    const yEnd = Math.min(h, yStart + BLOCK_SIZE);
+
+    for (let gx = 0; gx < gridCols; gx++) {
+      const xStart = gx * BLOCK_SIZE;
+      const xEnd = Math.min(w, xStart + BLOCK_SIZE);
+
+      // Collect luminance samples in block
+      const lumaSamples: number[] = [];
+      for (let y = yStart; y < yEnd; y += 2) {
+        const row = y * w;
+        for (let x = xStart; x < xEnd; x += 2) {
+          const idx = (row + x) * 4;
+          const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          lumaSamples.push(luma);
+        }
+      }
+
+      // Local background is high percentile (paper without ink)
+      if (lumaSamples.length > 0) {
+        lumaSamples.sort((a, b) => a - b);
+        // 88th percentile
+        const pIdx = Math.min(lumaSamples.length - 1, Math.floor(lumaSamples.length * 0.88));
+        bgGrid[gy * gridCols + gx] = Math.max(40, lumaSamples[pIdx]);
+      } else {
+        bgGrid[gy * gridCols + gx] = 200;
+      }
+    }
+  }
+
+  // 2. Normalize full image against smooth interpolated background illumination
+  for (let y = 0; y < h; y++) {
+    // Vertical interpolation weight
+    const gyExact = y / BLOCK_SIZE;
+    const gy0 = Math.min(gridRows - 1, Math.floor(gyExact));
+    const gy1 = Math.min(gridRows - 1, gy0 + 1);
+    const ty = gyExact - gy0;
+
+    const rowOffset = y * w * 4;
+
+    for (let x = 0; x < w; x++) {
+      // Horizontal interpolation weight
+      const gxExact = x / BLOCK_SIZE;
+      const gx0 = Math.min(gridCols - 1, Math.floor(gxExact));
+      const gx1 = Math.min(gridCols - 1, gx0 + 1);
+      const tx = gxExact - gx0;
+
+      // Bilinear sample of local illumination
+      const top = bgGrid[gy0 * gridCols + gx0] * (1 - tx) + bgGrid[gy0 * gridCols + gx1] * tx;
+      const bottom = bgGrid[gy1 * gridCols + gx0] * (1 - tx) + bgGrid[gy1 * gridCols + gx1] * tx;
+      const localBg = Math.max(35, top * (1 - ty) + bottom * ty);
+
+      const scale = 250 / localBg;
+      const idx = rowOffset + x * 4;
+
+      let r = data[idx] * scale;
+      let g = data[idx + 1] * scale;
+      let b = data[idx + 2] * scale;
+
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+      // Clean paper whitening
+      if (luma > 218) {
+        const factor = (luma - 218) / 37;
+        r = r * (1 - factor) + 255 * factor;
+        g = g * (1 - factor) + 255 * factor;
+        b = b * (1 - factor) + 255 * factor;
+      } else if (luma < 95) {
+        // Deepen text ink
+        const factor = luma / 95;
+        r = r * factor;
+        g = g * factor;
+        b = b * factor;
+      }
+
+      data[idx] = Math.min(255, Math.max(0, r | 0));
+      data[idx + 1] = Math.min(255, Math.max(0, g | 0));
+      data[idx + 2] = Math.min(255, Math.max(0, b | 0));
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+/**
  * Filter dispatch helper
  */
 export function applyFilter(source: HTMLCanvasElement, filter: FilterType): HTMLCanvasElement {
   switch (filter) {
     case 'magic':
       return applyMagicColor(source);
+    case 'noshadow':
+      return applyNoShadow(source);
     case 'bw':
       return applyCrispBW(source);
     case 'grayscale':

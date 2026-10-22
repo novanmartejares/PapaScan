@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Sparkles,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Save,
+  Download,
 } from 'lucide-react';
 import { extractTextFromImage, OCRProgress } from '@/lib/ocr/engine';
 
@@ -29,6 +30,11 @@ export const OCRPanel: React.FC<OCRPanelProps> = ({
   const [progress, setProgress] = useState<OCRProgress>({ status: '', progress: 0 });
   const [copied, setCopied] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
+
+  // Sync initialText when page or document selection changes
+  useEffect(() => {
+    setExtractedText(initialText);
+  }, [initialText]);
 
   // Start OCR Extraction
   const handleStartOCR = async () => {
@@ -61,6 +67,18 @@ export const OCRPanel: React.FC<OCRPanelProps> = ({
     }
   };
 
+  // Download as TXT file
+  const handleDownloadTxt = () => {
+    if (!extractedText) return;
+    const blob = new Blob([extractedText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `papascan-ocr-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
       {/* Top action row */}
@@ -79,22 +97,34 @@ export const OCRPanel: React.FC<OCRPanelProps> = ({
 
         <div className="flex items-center gap-2">
           {extractedText && (
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Text</span>
-                </>
-              )}
-            </button>
+            <>
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                title="Copy text to clipboard"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handleDownloadTxt}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                title="Download extracted text as .txt file"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-400" />
+                <span>Export .TXT</span>
+              </button>
+            </>
           )}
 
           <button

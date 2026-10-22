@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { FilterType } from '@/types';
-import { Sparkles, Contrast, Eye, Image as ImageIcon } from 'lucide-react';
+import { Sparkles, Sun, Contrast, Eye, Image as ImageIcon } from 'lucide-react';
 
 interface FilterBarProps {
   currentFilter: FilterType;
@@ -28,6 +28,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       sublabel: 'Vibrant Paper',
       icon: <Sparkles className="w-4 h-4" />,
       color: 'from-amber-400 to-sky-400',
+    },
+    {
+      id: 'noshadow',
+      label: 'No Shadow',
+      sublabel: 'CamScanner Clear',
+      icon: <Sun className="w-4 h-4" />,
+      color: 'from-amber-300 to-emerald-400',
     },
     {
       id: 'bw',

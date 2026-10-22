@@ -13,6 +13,7 @@ import {
   Loader2,
   RefreshCw,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 import { ScanBatchItem, CaptureMode } from '@/types';
 import { compositeIDCardsToA4Page } from '@/lib/cv/id-compositor';
@@ -49,9 +50,11 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   const [idCardStep, setIdCardStep] = useState<'front' | 'back' | 'compositing'>('front');
   const [idFrontImage, setIdFrontImage] = useState<string | null>(null);
 
-  // Smart Document Shoot state
+  // Smart Document Shoot & Auto-Capture state
   const [smartShootEnabled, setSmartShootEnabled] = useState(true);
   const [isDocumentDetected, setIsDocumentDetected] = useState(false);
+  const [autoCapture, setAutoCapture] = useState(true);
+  const [autoCaptureProgress, setAutoCaptureProgress] = useState(0);
 
   // Tab: camera vs upload
   const [tab, setTab] = useState<'camera' | 'upload'>('camera');
@@ -142,6 +145,34 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     return () => clearInterval(intervalId);
   }, [cameraActive, tab, smartShootEnabled]);
+
+  // Hands-Free Auto-Capture stability timer (CamScanner Smart Scan)
+  useEffect(() => {
+    if (
+      !autoCapture ||
+      !isDocumentDetected ||
+      !cameraActive ||
+      tab !== 'camera' ||
+      captureMode === 'id_card' ||
+      idCardStep === 'compositing'
+    ) {
+      setAutoCaptureProgress(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setAutoCaptureProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(timer);
+          captureFrame();
+          return 0;
+        }
+        return prev + 25; // ~1s steady hold to auto-capture
+      });
+    }, 250);
+
+    return () => clearInterval(timer);
+  }, [autoCapture, isDocumentDetected, cameraActive, tab, captureMode, idCardStep]);
 
   // Reset ID card state when switching modes
   const handleSelectMode = (mode: CaptureMode) => {
@@ -338,6 +369,22 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             </button>
           )}
 
+          {/* CamScanner Hands-Free Auto-Capture Toggle */}
+          {captureMode !== 'id_card' && (
+            <button
+              onClick={() => setAutoCapture((prev) => !prev)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold transition-all ${
+                autoCapture
+                  ? 'bg-emerald-500/25 border-emerald-400/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                  : 'bg-black/50 border-white/10 text-white/50'
+              }`}
+              title="Toggle Hands-Free Auto-Capture"
+            >
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">{autoCapture ? 'Auto Snap' : 'Manual'}</span>
+            </button>
+          )}
+
           {torchSupported && (
             <button
               onClick={toggleTorch}
@@ -379,6 +426,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               aspectRatio={captureMode === 'id_card' ? 'id_card' : 'document'}
               isDocumentDetected={isDocumentDetected}
               smartShootEnabled={smartShootEnabled}
+              autoCapture={autoCapture}
+              autoCaptureProgress={autoCaptureProgress}
               stepBadge={
                 captureMode === 'id_card'
                   ? idCardStep === 'front'
@@ -480,22 +529,48 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           )}
         </button>
 
-        {/* Shutter Button */}
+        {/* Shutter Button with Auto-Capture circular progress ring */}
         {tab === 'camera' && (
-          <button
-            onClick={captureFrame}
-            disabled={idCardStep === 'compositing'}
-            className="group relative w-20 h-20 rounded-full border-4 border-white/80 p-1 flex items-center justify-center active:scale-90 transition-transform shadow-2xl"
-            aria-label="Capture photo"
-          >
-            <div
-              className={`w-full h-full rounded-full transition-colors flex items-center justify-center shadow-lg ${
-                captureMode === 'id_card'
-                  ? 'bg-gradient-to-tr from-indigo-500 to-sky-400 group-hover:from-indigo-400 group-hover:to-sky-300'
-                  : 'bg-white group-hover:bg-sky-400'
-              }`}
-            />
-          </button>
+          <div className="relative flex items-center justify-center">
+            {autoCapture && autoCaptureProgress > 0 && (
+              <svg className="absolute w-[94px] h-[94px] pointer-events-none -rotate-90">
+                <circle
+                  cx="47"
+                  cy="47"
+                  r="43"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.2)"
+                  strokeWidth="4"
+                />
+                <circle
+                  cx="47"
+                  cy="47"
+                  r="43"
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="4"
+                  strokeDasharray="270"
+                  strokeDashoffset={270 - (270 * autoCaptureProgress) / 100}
+                  strokeLinecap="round"
+                  className="transition-all duration-200"
+                />
+              </svg>
+            )}
+            <button
+              onClick={captureFrame}
+              disabled={idCardStep === 'compositing'}
+              className="group relative w-20 h-20 rounded-full border-4 border-white/80 p-1 flex items-center justify-center active:scale-90 transition-transform shadow-2xl"
+              aria-label="Capture photo"
+            >
+              <div
+                className={`w-full h-full rounded-full transition-colors flex items-center justify-center shadow-lg ${
+                  captureMode === 'id_card'
+                    ? 'bg-gradient-to-tr from-indigo-500 to-sky-400 group-hover:from-indigo-400 group-hover:to-sky-300'
+                    : 'bg-white group-hover:bg-sky-400'
+                }`}
+              />
+            </button>
+          </div>
         )}
 
         {/* Batch Review / ID Card Badge */}

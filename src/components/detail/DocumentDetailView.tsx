@@ -13,12 +13,17 @@ import {
   FileText,
   Plus,
   PenTool,
+  ShieldCheck,
+  Eraser,
+  Sparkles,
 } from 'lucide-react';
 import { ScannedDocument, ScannedPage, DocumentCategory } from '@/types';
 import { PageReorderStrip } from './PageReorderStrip';
 import { OCRPanel } from './OCRPanel';
 import { ExportModal } from './ExportModal';
 import { SignatureModal } from './SignatureModal';
+import { WatermarkModal } from './WatermarkModal';
+import { RedactionModal } from './RedactionModal';
 
 interface DocumentDetailViewProps {
   document: ScannedDocument;
@@ -44,6 +49,8 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
   const [titleInput, setTitleInput] = useState(doc.title);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
+  const [isWatermarkModalOpen, setIsWatermarkModalOpen] = useState(false);
+  const [isRedactionModalOpen, setIsRedactionModalOpen] = useState(false);
 
   const activePage = doc.pages[activePageIndex] || doc.pages[0];
 
@@ -107,6 +114,36 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
 
   // Save signed page
   const handleSaveSignedPage = (newProcessedImageUrl: string, newThumbnailUrl: string) => {
+    const newPages = [...doc.pages];
+    if (newPages[activePageIndex]) {
+      newPages[activePageIndex] = {
+        ...newPages[activePageIndex],
+        processedImageUrl: newProcessedImageUrl,
+        thumbnailUrl: newThumbnailUrl,
+      };
+      const updated = { ...doc, pages: newPages, updatedAt: Date.now() };
+      setDoc(updated);
+      onUpdateDocument(updated);
+    }
+  };
+
+  // Save watermarked page
+  const handleSaveWatermarkedPage = (newProcessedImageUrl: string, newThumbnailUrl: string) => {
+    const newPages = [...doc.pages];
+    if (newPages[activePageIndex]) {
+      newPages[activePageIndex] = {
+        ...newPages[activePageIndex],
+        processedImageUrl: newProcessedImageUrl,
+        thumbnailUrl: newThumbnailUrl,
+      };
+      const updated = { ...doc, pages: newPages, updatedAt: Date.now() };
+      setDoc(updated);
+      onUpdateDocument(updated);
+    }
+  };
+
+  // Save redacted page
+  const handleSaveRedactedPage = (newProcessedImageUrl: string, newThumbnailUrl: string) => {
     const newPages = [...doc.pages];
     if (newPages[activePageIndex]) {
       newPages[activePageIndex] = {
@@ -245,7 +282,7 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
 
         {/* Active Page Image Preview Card */}
         {activePage && (
-          <div className="relative rounded-3xl bg-slate-900/40 border border-slate-800/80 p-4 sm:p-6 flex flex-col items-center">
+          <div className="relative rounded-3xl bg-slate-900/40 border border-slate-800/80 p-4 sm:p-6 flex flex-col items-center gap-3">
             <div className="relative max-w-md w-full aspect-[3/4] bg-slate-950 rounded-2xl overflow-hidden shadow-2xl border border-slate-800 flex items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -253,25 +290,53 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
                 alt={`Page ${activePageIndex + 1}`}
                 className="w-full h-full object-contain"
               />
+            </div>
 
-              {/* Action Floating Buttons Overlay */}
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <button
-                  onClick={() => setIsSignatureModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 backdrop-blur-md text-white text-xs font-semibold border border-indigo-400/30 shadow-lg active:scale-95 transition-all"
-                >
-                  <PenTool className="w-3.5 h-3.5" />
-                  <span>Sign Document</span>
-                </button>
+            {/* CamScanner Pro Document Tools Bar */}
+            <div className="w-full max-w-md flex items-center justify-between gap-1.5 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl overflow-x-auto">
+              <button
+                onClick={() => setIsSignatureModalOpen(true)}
+                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                title="Add digital transparent signature"
+              >
+                <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400">
+                  <PenTool className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-bold">Sign</span>
+              </button>
 
-                <button
-                  onClick={() => onEditPageCrop(activePageIndex)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-md hover:bg-black/90 text-white text-xs font-semibold border border-white/15 shadow-lg active:scale-95 transition-all"
-                >
-                  <Crop className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Adjust Crop & Filter</span>
-                </button>
-              </div>
+              <button
+                onClick={() => setIsWatermarkModalOpen(true)}
+                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                title="Apply confidential or security watermark"
+              >
+                <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-bold">Watermark</span>
+              </button>
+
+              <button
+                onClick={() => setIsRedactionModalOpen(true)}
+                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                title="Redact or whiteout sensitive information"
+              >
+                <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400">
+                  <Eraser className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-bold">Redact</span>
+              </button>
+
+              <button
+                onClick={() => onEditPageCrop(activePageIndex)}
+                className="flex-1 min-w-[76px] py-2 px-2 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95"
+                title="Crop, rotate, and apply lighting filters"
+              >
+                <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
+                  <Crop className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-bold">Crop / Filter</span>
+              </button>
             </div>
           </div>
         )}
@@ -316,6 +381,26 @@ export const DocumentDetailView: React.FC<DocumentDetailViewProps> = ({
           onClose={() => setIsSignatureModalOpen(false)}
           pageImageUrl={activePage.processedImageUrl}
           onSaveSignedPage={handleSaveSignedPage}
+        />
+      )}
+
+      {/* CamScanner Anti-Theft Watermark Modal */}
+      {activePage && (
+        <WatermarkModal
+          isOpen={isWatermarkModalOpen}
+          onClose={() => setIsWatermarkModalOpen(false)}
+          pageImageUrl={activePage.processedImageUrl}
+          onSaveWatermarkedPage={handleSaveWatermarkedPage}
+        />
+      )}
+
+      {/* CamScanner Redaction / Eraser Modal */}
+      {activePage && (
+        <RedactionModal
+          isOpen={isRedactionModalOpen}
+          onClose={() => setIsRedactionModalOpen(false)}
+          pageImageUrl={activePage.processedImageUrl}
+          onSaveRedactedPage={handleSaveRedactedPage}
         />
       )}
     </div>

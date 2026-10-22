@@ -12,8 +12,25 @@ export interface RectCrop {
 
 export type AspectRatioType = 'free' | 'a4' | '1:1' | '4:3' | 'original';
 
-export type FilterType = 'original' | 'magic' | 'bw' | 'grayscale';
+export type FilterType = 'original' | 'magic' | 'noshadow' | 'bw' | 'grayscale';
 export type DocumentCategory = 'All' | 'Receipts' | 'IDs' | 'Contracts' | 'Notes' | 'General';
+
+export interface WatermarkOptions {
+  text: string;
+  opacity: number; // 0.1 to 0.7
+  color: string;
+  fontSize: number;
+  rotation: number; // angle in degrees e.g. -30
+  tile: boolean; // repeat across page
+}
+
+export interface RedactionArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  style: 'whiteout' | 'blackout';
+}
 
 export interface ScannedPage {
   id: string;
