@@ -1,37 +1,39 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Point } from '@/types';
-import { distance } from '@/lib/cv/geometry';
+import { Point, RectCrop } from '@/types';
 import { LoupeMagnifier } from './LoupeMagnifier';
 
 interface CropCanvasProps {
   imageSrc: string;
-  corners: [Point, Point, Point, Point]; // In image coordinates: TL, TR, BR, BL
-  onChangeCorners: (corners: [Point, Point, Point, Point]) => void;
-  rotation: number;
+  crop: RectCrop;
+  onChangeCrop: (crop: RectCrop) => void;
+  aspectRatio?: number | null; // width / height ratio, or null for free
 }
 
-const CORNER_NAMES = [
-  'Top-Left (TL)',
-  'Top-Right (TR)',
-  'Bottom-Right (BR)',
-  'Bottom-Left (BL)',
-];
+type HandleType = 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w' | 'move' | 'new';
 
-const CORNER_SHORT_TAGS = ['TL', 'TR', 'BR', 'BL'];
+const CORNER_NAMES: Record<string, string> = {
+  nw: 'Top-Left',
+  ne: 'Top-Right',
+  se: 'Bottom-Right',
+  sw: 'Bottom-Left',
+};
+
+const MIN_CROP_DIM = 40; // minimum width/height in image coordinates
 
 export const CropCanvas: React.FC<CropCanvasProps> = ({
   imageSrc,
-  corners,
-  onChangeCorners,
-  rotation,
+  crop,
+  onChangeCrop,
+  aspectRatio = null,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
-  const [activeHandleIndex, setActiveHandleIndex] = useState<number | null>(null);
+  const [activeHandle, setActiveHandle] = useState<HandleType | null>(null);
+  const [hoverCursor, setHoverCursor] = useState<string>('default');
   const [pointerScreenPos, setPointerScreenPos] = useState<Point>({ x: 0, y: 0 });
 
   // Store scale & offset from source image coordinates to canvas screen display coordinates
@@ -41,6 +43,15 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     offsetY: 0,
     displayWidth: 0,
     displayHeight: 0,
+  });
+
+  // Track initial drag state
+  const dragStartRef = useRef<{
+    startImgPos: Point;
+    startCrop: RectCrop;
+  }>({
+    startImgPos: { x: 0, y: 0 },
+    startCrop: { x: 0, y: 0, width: 100, height: 100 },
   });
 
   // Load image
@@ -116,127 +127,154 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(imageObj, offsetX, offsetY, displayW, displayH);
 
-    // 2. Dim region outside the quadrilateral with semi-transparent dark mask
-    const displayCorners = corners.map(imgToCanvas);
+    // Compute display rectangle coordinates for the crop box
+    const dx1 = Math.round(crop.x * scale + offsetX);
+    const dy1 = Math.round(crop.y * scale + offsetY);
+    const dw = Math.round(crop.width * scale);
+    const dh = Math.round(crop.height * scale);
+    const dx2 = dx1 + dw;
+    const dy2 = dy1 + dh;
 
+    // 2. Dim outer region with dark semi-transparent mask
     ctx.save();
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
-    ctx.beginPath();
-    ctx.rect(0, 0, width, height);
-
-    // Polygon cutout
-    ctx.moveTo(displayCorners[0].x, displayCorners[0].y);
-    ctx.lineTo(displayCorners[1].x, displayCorners[1].y);
-    ctx.lineTo(displayCorners[2].x, displayCorners[2].y);
-    ctx.lineTo(displayCorners[3].x, displayCorners[3].y);
-    ctx.closePath();
-    ctx.fill('evenodd');
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.68)';
+    // Top strip
+    ctx.fillRect(0, 0, width, Math.max(0, dy1));
+    // Bottom strip
+    ctx.fillRect(0, dy2, width, Math.max(0, height - dy2));
+    // Left strip
+    ctx.fillRect(0, dy1, Math.max(0, dx1), dh);
+    // Right strip
+    ctx.fillRect(dx2, dy1, Math.max(0, width - dx2), dh);
     ctx.restore();
 
-    // 3. Perspective 3x3 alignment grid inside quadrilateral
+    // 3. Rule-of-thirds grid inside the crop box
     ctx.save();
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
 
-    for (let i = 1; i <= 2; i++) {
-      const t = i / 3;
-      // Horizontal interior grid line
-      const leftPt = {
-        x: displayCorners[0].x * (1 - t) + displayCorners[3].x * t,
-        y: displayCorners[0].y * (1 - t) + displayCorners[3].y * t,
-      };
-      const rightPt = {
-        x: displayCorners[1].x * (1 - t) + displayCorners[2].x * t,
-        y: displayCorners[1].y * (1 - t) + displayCorners[2].y * t,
-      };
-      ctx.beginPath();
-      ctx.moveTo(leftPt.x, leftPt.y);
-      ctx.lineTo(rightPt.x, rightPt.y);
-      ctx.stroke();
-
-      // Vertical interior grid line
-      const topPt = {
-        x: displayCorners[0].x * (1 - t) + displayCorners[1].x * t,
-        y: displayCorners[0].y * (1 - t) + displayCorners[1].y * t,
-      };
-      const bottomPt = {
-        x: displayCorners[3].x * (1 - t) + displayCorners[2].x * t,
-        y: displayCorners[3].y * (1 - t) + displayCorners[2].y * t,
-      };
-      ctx.beginPath();
-      ctx.moveTo(topPt.x, topPt.y);
-      ctx.lineTo(bottomPt.x, bottomPt.y);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // 4. Perimeter polygon boundary line
-    ctx.save();
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(displayCorners[0].x, displayCorners[0].y);
-    ctx.lineTo(displayCorners[1].x, displayCorners[1].y);
-    ctx.lineTo(displayCorners[2].x, displayCorners[2].y);
-    ctx.lineTo(displayCorners[3].x, displayCorners[3].y);
-    ctx.closePath();
+    // 2 horizontal grid lines
+    ctx.moveTo(dx1, dy1 + dh / 3);
+    ctx.lineTo(dx2, dy1 + dh / 3);
+    ctx.moveTo(dx1, dy1 + (dh * 2) / 3);
+    ctx.lineTo(dx2, dy1 + (dh * 2) / 3);
+    // 2 vertical grid lines
+    ctx.moveTo(dx1 + dw / 3, dy1);
+    ctx.lineTo(dx1 + dw / 3, dy2);
+    ctx.moveTo(dx1 + (dw * 2) / 3, dy1);
+    ctx.lineTo(dx1 + (dw * 2) / 3, dy2);
     ctx.stroke();
     ctx.restore();
 
-    // 5. Render 4 corner handles with glowing halo and label tags
-    displayCorners.forEach((corner, idx) => {
-      const isActive = activeHandleIndex === idx;
+    // 4. Crop bounding rectangle border
+    ctx.save();
+    ctx.strokeStyle = '#38bdf8'; // Sky blue border
+    ctx.lineWidth = 2;
+    ctx.strokeRect(dx1, dy1, dw, dh);
+    ctx.restore();
 
-      ctx.save();
-      // Outer neon glow
-      ctx.shadowColor = '#38bdf8';
-      ctx.shadowBlur = isActive ? 18 : 8;
+    // 5. Professional Corner L-brackets
+    const L_LEN = Math.max(12, Math.min(22, Math.min(dw, dh) / 3));
+    const L_THICK = 3.5;
+    ctx.save();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = L_THICK;
+    ctx.lineCap = 'square';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 6;
 
-      // Outer white ring
-      ctx.beginPath();
-      ctx.arc(corner.x, corner.y, isActive ? 20 : 15, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
+    // Top-Left (TL)
+    ctx.beginPath();
+    ctx.moveTo(dx1, dy1 + L_LEN);
+    ctx.lineTo(dx1, dy1);
+    ctx.lineTo(dx1 + L_LEN, dy1);
+    ctx.stroke();
 
-      // Inner cyan core
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.arc(corner.x, corner.y, isActive ? 13 : 9, 0, Math.PI * 2);
-      ctx.fillStyle = isActive ? '#0284c7' : '#0ea5e9';
-      ctx.fill();
+    // Top-Right (TR)
+    ctx.beginPath();
+    ctx.moveTo(dx2 - L_LEN, dy1);
+    ctx.lineTo(dx2, dy1);
+    ctx.lineTo(dx2, dy1 + L_LEN);
+    ctx.stroke();
 
-      // Center bright pip
-      ctx.beginPath();
-      ctx.arc(corner.x, corner.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
+    // Bottom-Right (BR)
+    ctx.beginPath();
+    ctx.moveTo(dx2, dy2 - L_LEN);
+    ctx.lineTo(dx2, dy2);
+    ctx.lineTo(dx2 - L_LEN, dy2);
+    ctx.stroke();
 
-      // Corner Short Tag Badge (TL, TR, BR, BL)
-      const tagOffsetDist = isActive ? 30 : 25;
-      const angle = (idx * Math.PI) / 2 + Math.PI / 4;
-      const tagX = corner.x + Math.sin(angle) * tagOffsetDist;
-      const tagY = corner.y - Math.cos(angle) * tagOffsetDist;
+    // Bottom-Left (BL)
+    ctx.beginPath();
+    ctx.moveTo(dx1 + L_LEN, dy2);
+    ctx.lineTo(dx1, dy2);
+    ctx.lineTo(dx1, dy2 - L_LEN);
+    ctx.stroke();
+    ctx.restore();
 
+    // 6. Edge Drag Handles (capsules)
+    const BAR_LEN = Math.max(14, Math.min(28, Math.min(dw, dh) / 3));
+    const BAR_THICK = 3.5;
+    ctx.save();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = BAR_THICK;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 4;
+
+    // Top
+    ctx.beginPath();
+    ctx.moveTo(dx1 + dw / 2 - BAR_LEN / 2, dy1);
+    ctx.lineTo(dx1 + dw / 2 + BAR_LEN / 2, dy1);
+    ctx.stroke();
+
+    // Bottom
+    ctx.beginPath();
+    ctx.moveTo(dx1 + dw / 2 - BAR_LEN / 2, dy2);
+    ctx.lineTo(dx1 + dw / 2 + BAR_LEN / 2, dy2);
+    ctx.stroke();
+
+    // Left
+    ctx.beginPath();
+    ctx.moveTo(dx1, dy1 + dh / 2 - BAR_LEN / 2);
+    ctx.lineTo(dx1, dy1 + dh / 2 + BAR_LEN / 2);
+    ctx.stroke();
+
+    // Right
+    ctx.beginPath();
+    ctx.moveTo(dx2, dy1 + dh / 2 - BAR_LEN / 2);
+    ctx.lineTo(dx2, dy1 + dh / 2 + BAR_LEN / 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // 7. Dimension Pill Badge
+    const badgeText = `${Math.round(crop.width)} × ${Math.round(crop.height)} px`;
+    ctx.save();
+    ctx.font = '600 11px system-ui, sans-serif';
+    const textWidth = ctx.measureText(badgeText).width;
+    const badgeW = textWidth + 14;
+    const badgeH = 20;
+    const badgeX = dx1 + 8;
+    const badgeY = dy1 + 8;
+
+    if (dw > badgeW + 16 && dh > badgeH + 16) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-      ctx.lineWidth = 1;
-      const tagW = 24;
-      const tagH = 16;
       ctx.beginPath();
-      ctx.roundRect(tagX - tagW / 2, tagY - tagH / 2, tagW, tagH, 4);
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 5);
       ctx.fill();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.lineWidth = 1;
       ctx.stroke();
 
       ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(CORNER_SHORT_TAGS[idx], tagX, tagY);
-
-      ctx.restore();
-    });
-  }, [imageObj, corners, activeHandleIndex, imgToCanvas]);
+      ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+    }
+    ctx.restore();
+  }, [imageObj, crop]);
 
   useEffect(() => {
     redraw();
@@ -245,7 +283,83 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [redraw]);
 
-  // Pointer event handlers with generous touch radius
+  // Determine which handle (if any) is under the cursor/touch point
+  const getHandleAt = useCallback(
+    (canvasX: number, canvasY: number): HandleType | null => {
+      const { scale, offsetX, offsetY } = transformRef.current;
+      const dx1 = crop.x * scale + offsetX;
+      const dy1 = crop.y * scale + offsetY;
+      const dw = crop.width * scale;
+      const dh = crop.height * scale;
+      const dx2 = dx1 + dw;
+      const dy2 = dy1 + dh;
+
+      const CORNER_RADIUS = 34; // Generous touch target
+      const EDGE_MARGIN = 22;
+
+      // 1. Corners
+      if (Math.hypot(canvasX - dx1, canvasY - dy1) <= CORNER_RADIUS) return 'nw';
+      if (Math.hypot(canvasX - dx2, canvasY - dy1) <= CORNER_RADIUS) return 'ne';
+      if (Math.hypot(canvasX - dx2, canvasY - dy2) <= CORNER_RADIUS) return 'se';
+      if (Math.hypot(canvasX - dx1, canvasY - dy2) <= CORNER_RADIUS) return 'sw';
+
+      // 2. Edges
+      if (
+        Math.abs(canvasY - dy1) <= EDGE_MARGIN &&
+        canvasX >= dx1 - 10 &&
+        canvasX <= dx2 + 10
+      )
+        return 'n';
+      if (
+        Math.abs(canvasY - dy2) <= EDGE_MARGIN &&
+        canvasX >= dx1 - 10 &&
+        canvasX <= dx2 + 10
+      )
+        return 's';
+      if (
+        Math.abs(canvasX - dx1) <= EDGE_MARGIN &&
+        canvasY >= dy1 - 10 &&
+        canvasY <= dy2 + 10
+      )
+        return 'w';
+      if (
+        Math.abs(canvasX - dx2) <= EDGE_MARGIN &&
+        canvasY >= dy1 - 10 &&
+        canvasY <= dy2 + 10
+      )
+        return 'e';
+
+      // 3. Inside the crop box (move)
+      if (canvasX >= dx1 && canvasX <= dx2 && canvasY >= dy1 && canvasY <= dy2) {
+        return 'move';
+      }
+
+      return null;
+    },
+    [crop]
+  );
+
+  // Update hover cursor
+  const handlePointerHover = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activeHandle !== null) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    const handle = getHandleAt(px, py);
+    let cursor = 'crosshair';
+    if (handle === 'nw' || handle === 'se') cursor = 'nwse-resize';
+    else if (handle === 'ne' || handle === 'sw') cursor = 'nesw-resize';
+    else if (handle === 'n' || handle === 's') cursor = 'ns-resize';
+    else if (handle === 'e' || handle === 'w') cursor = 'ew-resize';
+    else if (handle === 'move') cursor = 'move';
+
+    setHoverCursor(cursor);
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !imageObj) return;
@@ -254,33 +368,46 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
 
-    const TOUCH_HIT_RADIUS = 44; // Finger-friendly touch radius
-    let closestIdx = -1;
-    let minDistance = TOUCH_HIT_RADIUS;
+    const handle = getHandleAt(px, py) || 'new';
+    const imgPos = canvasToImg({ x: px, y: py });
 
-    corners.forEach((corner, idx) => {
-      const disp = imgToCanvas(corner);
-      const d = Math.hypot(disp.x - px, disp.y - py);
-      if (d < minDistance) {
-        minDistance = d;
-        closestIdx = idx;
-      }
-    });
+    canvas.setPointerCapture(e.pointerId);
+    setActiveHandle(handle);
+    setPointerScreenPos({ x: e.clientX, y: e.clientY });
 
-    if (closestIdx !== -1) {
-      canvas.setPointerCapture(e.pointerId);
-      setActiveHandleIndex(closestIdx);
-      setPointerScreenPos({ x: e.clientX, y: e.clientY });
+    dragStartRef.current = {
+      startImgPos: imgPos,
+      startCrop: { ...crop },
+    };
 
-      // Haptic bump if supported
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(25);
-      }
+    if (handle === 'new') {
+      // Start a fresh drag box from click position
+      const clampedX = Math.max(0, Math.min(imageObj.width - 20, imgPos.x));
+      const clampedY = Math.max(0, Math.min(imageObj.height - 20, imgPos.y));
+      onChangeCrop({
+        x: Math.round(clampedX),
+        y: Math.round(clampedY),
+        width: 20,
+        height: 20,
+      });
+      dragStartRef.current.startCrop = {
+        x: Math.round(clampedX),
+        y: Math.round(clampedY),
+        width: 20,
+        height: 20,
+      };
+      setActiveHandle('se');
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(20);
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (activeHandleIndex === null || !imageObj || !canvasRef.current) return;
+    handlePointerHover(e);
+
+    if (activeHandle === null || !imageObj || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -289,30 +416,126 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
 
     setPointerScreenPos({ x: e.clientX, y: e.clientY });
 
-    // Convert screen coordinates to source image coordinate space
-    const imgPoint = canvasToImg({ x: px, y: py });
+    const currentImgPos = canvasToImg({ x: px, y: py });
+    const { startImgPos, startCrop } = dragStartRef.current;
+    const dx = currentImgPos.x - startImgPos.x;
+    const dy = currentImgPos.y - startImgPos.y;
 
-    // Clamp within source image boundaries
-    const clampedX = Math.max(0, Math.min(imageObj.width, imgPoint.x));
-    const clampedY = Math.max(0, Math.min(imageObj.height, imgPoint.y));
+    const imgW = imageObj.width;
+    const imgH = imageObj.height;
 
-    const newCorners = [...corners] as [Point, Point, Point, Point];
-    newCorners[activeHandleIndex] = {
-      x: Math.round(clampedX),
-      y: Math.round(clampedY),
-    };
+    let newCrop: RectCrop = { ...startCrop };
 
-    onChangeCorners(newCorners);
+    if (activeHandle === 'move') {
+      // Move entire crop box within image boundaries
+      let newX = startCrop.x + dx;
+      let newY = startCrop.y + dy;
+      newX = Math.max(0, Math.min(imgW - startCrop.width, newX));
+      newY = Math.max(0, Math.min(imgH - startCrop.height, newY));
+      newCrop = {
+        x: Math.round(newX),
+        y: Math.round(newY),
+        width: startCrop.width,
+        height: startCrop.height,
+      };
+    } else {
+      // Edge & Corner resizing
+      let x1 = startCrop.x;
+      let y1 = startCrop.y;
+      let x2 = startCrop.x + startCrop.width;
+      let y2 = startCrop.y + startCrop.height;
+
+      switch (activeHandle) {
+        case 'nw':
+          x1 = Math.min(x2 - MIN_CROP_DIM, Math.max(0, startCrop.x + dx));
+          y1 = Math.min(y2 - MIN_CROP_DIM, Math.max(0, startCrop.y + dy));
+          break;
+        case 'ne':
+          x2 = Math.max(x1 + MIN_CROP_DIM, Math.min(imgW, startCrop.x + startCrop.width + dx));
+          y1 = Math.min(y2 - MIN_CROP_DIM, Math.max(0, startCrop.y + dy));
+          break;
+        case 'se':
+          x2 = Math.max(x1 + MIN_CROP_DIM, Math.min(imgW, startCrop.x + startCrop.width + dx));
+          y2 = Math.max(y1 + MIN_CROP_DIM, Math.min(imgH, startCrop.y + startCrop.height + dy));
+          break;
+        case 'sw':
+          x1 = Math.min(x2 - MIN_CROP_DIM, Math.max(0, startCrop.x + dx));
+          y2 = Math.max(y1 + MIN_CROP_DIM, Math.min(imgH, startCrop.y + startCrop.height + dy));
+          break;
+        case 'n':
+          y1 = Math.min(y2 - MIN_CROP_DIM, Math.max(0, startCrop.y + dy));
+          break;
+        case 's':
+          y2 = Math.max(y1 + MIN_CROP_DIM, Math.min(imgH, startCrop.y + startCrop.height + dy));
+          break;
+        case 'w':
+          x1 = Math.min(x2 - MIN_CROP_DIM, Math.max(0, startCrop.x + dx));
+          break;
+        case 'e':
+          x2 = Math.max(x1 + MIN_CROP_DIM, Math.min(imgW, startCrop.x + startCrop.width + dx));
+          break;
+      }
+
+      // If aspect ratio is locked, adjust
+      if (aspectRatio && aspectRatio > 0) {
+        let curW = x2 - x1;
+        let curH = y2 - y1;
+
+        if (activeHandle === 'e' || activeHandle === 'w') {
+          curH = curW / aspectRatio;
+          if (y1 + curH > imgH) {
+            curH = imgH - y1;
+            curW = curH * aspectRatio;
+          }
+          y2 = y1 + curH;
+        } else {
+          curW = curH * aspectRatio;
+          if (x1 + curW > imgW) {
+            curW = imgW - x1;
+            curH = curW / aspectRatio;
+          }
+          x2 = x1 + curW;
+        }
+      }
+
+      newCrop = {
+        x: Math.round(x1),
+        y: Math.round(y1),
+        width: Math.round(x2 - x1),
+        height: Math.round(y2 - y1),
+      };
+    }
+
+    onChangeCrop(newCrop);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (activeHandleIndex !== null && canvasRef.current) {
+    if (activeHandle !== null && canvasRef.current) {
       try {
         canvasRef.current.releasePointerCapture(e.pointerId);
       } catch {}
-      setActiveHandleIndex(null);
+      setActiveHandle(null);
     }
   };
+
+  // Determine active corner point for Loupe Magnifier if user is dragging a corner
+  const getActiveCornerPoint = (): Point | null => {
+    if (!activeHandle || !['nw', 'ne', 'se', 'sw'].includes(activeHandle)) return null;
+    switch (activeHandle) {
+      case 'nw':
+        return { x: crop.x, y: crop.y };
+      case 'ne':
+        return { x: crop.x + crop.width, y: crop.y };
+      case 'se':
+        return { x: crop.x + crop.width, y: crop.y + crop.height };
+      case 'sw':
+        return { x: crop.x, y: crop.y + crop.height };
+      default:
+        return null;
+    }
+  };
+
+  const activeCornerPt = getActiveCornerPoint();
 
   return (
     <div
@@ -325,18 +548,19 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        className="w-full h-full cursor-crosshair"
+        style={{ cursor: hoverCursor }}
+        className="w-full h-full"
       />
 
-      {/* Loupe magnifier active while user drags any of the 4 corner handles */}
-      {activeHandleIndex !== null && imageObj && (
+      {/* Floating Loupe Magnifier when dragging corner handles */}
+      {activeCornerPt && imageObj && activeHandle && (
         <LoupeMagnifier
           sourceImage={imageObj}
-          activeCorner={corners[activeHandleIndex]}
-          cornerLabel={CORNER_NAMES[activeHandleIndex]}
+          activeCorner={activeCornerPt}
+          cornerLabel={CORNER_NAMES[activeHandle] || 'Corner'}
           containerOffset={pointerScreenPos}
           zoom={3.2}
-          size={124}
+          size={120}
         />
       )}
     </div>

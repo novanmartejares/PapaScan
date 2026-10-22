@@ -1,21 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   RotateCw,
   Check,
   Maximize2,
-  Sparkles,
   Loader2,
   ChevronRight,
-  Eye,
-  Crop,
-  Layers,
+  Crop as CropIcon,
+  FileText,
+  Square,
+  Smartphone,
 } from 'lucide-react';
-import { Point, FilterType, ScannedPage } from '@/types';
-import { getDefaultCorners, rotatePoints } from '@/lib/cv/geometry';
-import { warpPerspective } from '@/lib/cv/homography';
+import { RectCrop, FilterType, ScannedPage, AspectRatioType } from '@/types';
+import { getDefaultRectCrop, rotateRectCrop, cropToCorners } from '@/lib/cv/geometry';
 import { applyFilter, rotateCanvas } from '@/lib/cv/filters';
 import { CropCanvas } from './CropCanvas';
 import { FilterBar } from './FilterBar';
@@ -38,25 +37,24 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
   const [currentIdx, setCurrentIdx] = useState(0);
   const [currentFilter, setCurrentFilter] = useState<FilterType>(initialFilter);
   const [rotation, setRotation] = useState<number>(0);
-  const [corners, setCorners] = useState<[Point, Point, Point, Point]>([
-    { x: 0, y: 0 },
-    { x: 100, y: 0 },
-    { x: 100, y: 100 },
-    { x: 0, y: 100 },
-  ]);
+  const [selectedRatio, setSelectedRatio] = useState<AspectRatioType>('free');
+
+  const [crop, setCrop] = useState<RectCrop>({
+    x: 0,
+    y: 0,
+    width: 800,
+    height: 1000,
+  });
+
   const [imgDimensions, setImgDimensions] = useState<{ width: number; height: number }>({
     width: 800,
     height: 1000,
   });
 
-  // Editor mode: 'quad' for dragging 4 corners with loupe, 'preview' for viewing rectified homography warp
-  const [editorMode, setEditorMode] = useState<'quad' | 'preview'>('quad');
-  const [flattenedPreviewUrl, setFlattenedPreviewUrl] = useState<string | null>(null);
-
   const [isProcessing, setIsProcessing] = useState(false);
   const processedPagesRef = useRef<ScannedPage[]>([]);
 
-  // When image loads or index changes, compute default corners
+  // When image loads or index changes, compute default rectangular crop box
   useEffect(() => {
     if (!isOpen || rawImages.length === 0) return;
 
@@ -67,48 +65,71 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setImgDimensions({ width: img.width, height: img.height });
-      const defaultQuad = getDefaultCorners(img.width, img.height, 0.05);
-      setCorners(defaultQuad);
+      const defaultCrop = getDefaultRectCrop(img.width, img.height, 0.04);
+      setCrop(defaultCrop);
       setRotation(0);
       setCurrentFilter(initialFilter);
-      setEditorMode('quad');
-      setFlattenedPreviewUrl(null);
+      setSelectedRatio('free');
     };
     img.src = currentImgSrc;
   }, [isOpen, currentIdx, rawImages, initialFilter]);
-
-  // Compute live flattened preview when in preview mode or filter changes
-  const updateFlattenedPreview = useCallback(async () => {
-    if (!rawImages[currentIdx]) return;
-    try {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = rawImages[currentIdx];
-      });
-
-      // Compute true 4-point homography warp
-      const warpedCanvas = warpPerspective(img, corners, 1200);
-      // Apply chosen filter
-      const filteredCanvas = applyFilter(warpedCanvas, currentFilter);
-      setFlattenedPreviewUrl(filteredCanvas.toDataURL('image/jpeg', 0.9));
-    } catch (e) {
-      console.error('Flattened preview generation failed:', e);
-    }
-  }, [rawImages, currentIdx, corners, currentFilter]);
-
-  useEffect(() => {
-    if (editorMode === 'preview') {
-      updateFlattenedPreview();
-    }
-  }, [editorMode, currentFilter, updateFlattenedPreview]);
 
   if (!isOpen || rawImages.length === 0) return null;
 
   const currentImgSrc = rawImages[currentIdx];
   const isLastImage = currentIdx === rawImages.length - 1;
+
+  // Aspect ratio multiplier (width / height)
+  const getNumericAspectRatio = (): number | null => {
+    const isPortrait = imgDimensions.height >= imgDimensions.width;
+    switch (selectedRatio) {
+      case 'a4':
+        return isPortrait ? 1 / 1.414 : 1.414;
+      case '1:1':
+        return 1.0;
+      case '4:3':
+        return isPortrait ? 3 / 4 : 4 / 3;
+      case 'original':
+        return imgDimensions.width / imgDimensions.height;
+      case 'free':
+      default:
+        return null;
+    }
+  };
+
+  // Change Aspect Ratio preset and auto-adjust crop box
+  const handleSelectRatio = (ratio: AspectRatioType) => {
+    setSelectedRatio(ratio);
+    if (ratio === 'free') return;
+
+    let targetRatio = 1.0;
+    const isPortrait = imgDimensions.height >= imgDimensions.width;
+    if (ratio === 'a4') targetRatio = isPortrait ? 1 / 1.414 : 1.414;
+    else if (ratio === '1:1') targetRatio = 1.0;
+    else if (ratio === '4:3') targetRatio = isPortrait ? 3 / 4 : 4 / 3;
+    else if (ratio === 'original') targetRatio = imgDimensions.width / imgDimensions.height;
+
+    // Center crop with target aspect ratio
+    const imgW = imgDimensions.width;
+    const imgH = imgDimensions.height;
+    let newW = imgW * 0.9;
+    let newH = newW / targetRatio;
+
+    if (newH > imgH * 0.9) {
+      newH = imgH * 0.9;
+      newW = newH * targetRatio;
+    }
+
+    const newX = (imgW - newW) / 2;
+    const newY = (imgH - newH) / 2;
+
+    setCrop({
+      x: Math.round(newX),
+      y: Math.round(newY),
+      width: Math.round(newW),
+      height: Math.round(newH),
+    });
+  };
 
   // Rotate image 90 deg clockwise
   const handleRotateClockwise = () => {
@@ -125,28 +146,29 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
       const rotatedCanvas = rotateCanvas(c, 90);
       const newSrc = rotatedCanvas.toDataURL('image/jpeg', 0.95);
 
-      // Remap corners
-      const newCorners = rotatePoints(corners, img.width, img.height, 90);
+      // Rotate crop box to match new orientation
+      const newCrop = rotateRectCrop(crop, img.width, img.height, 90);
 
       rawImages[currentIdx] = newSrc;
       setImgDimensions({ width: rotatedCanvas.width, height: rotatedCanvas.height });
-      setCorners(newCorners);
-      if (editorMode === 'preview') {
-        updateFlattenedPreview();
-      }
+      setCrop(newCrop);
+      setRotation((prev) => (prev + 90) % 360);
     };
     img.src = currentImgSrc;
   };
 
-  // Reset corners to default document quad
-  const handleResetCorners = () => {
-    setCorners(getDefaultCorners(imgDimensions.width, imgDimensions.height, 0.04));
-    if (editorMode === 'preview') {
-      updateFlattenedPreview();
-    }
+  // Select full image bounds (1-click reset)
+  const handleSelectFullImage = () => {
+    setSelectedRatio('free');
+    setCrop({
+      x: 0,
+      y: 0,
+      width: imgDimensions.width,
+      height: imgDimensions.height,
+    });
   };
 
-  // Apply warp & filter, then advance or save
+  // Apply basic rectangular crop & selected filter, then save
   const handleApply = async () => {
     setIsProcessing(true);
 
@@ -159,11 +181,32 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
         img.src = currentImgSrc;
       });
 
-      // 1. Perspective Warp (Homography)
-      const warpedCanvas = warpPerspective(img, corners, 1800);
+      // 1. Direct rectangular crop
+      const safeCropX = Math.max(0, Math.min(img.width - 20, Math.round(crop.x)));
+      const safeCropY = Math.max(0, Math.min(img.height - 20, Math.round(crop.y)));
+      const safeCropW = Math.max(20, Math.min(img.width - safeCropX, Math.round(crop.width)));
+      const safeCropH = Math.max(20, Math.min(img.height - safeCropY, Math.round(crop.height)));
+
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = safeCropW;
+      cropCanvas.height = safeCropH;
+      const cropCtx = cropCanvas.getContext('2d');
+      if (!cropCtx) throw new Error('Could not get 2d context for crop');
+
+      cropCtx.drawImage(
+        img,
+        safeCropX,
+        safeCropY,
+        safeCropW,
+        safeCropH,
+        0,
+        0,
+        safeCropW,
+        safeCropH
+      );
 
       // 2. Filter application
-      const filteredCanvas = applyFilter(warpedCanvas, currentFilter);
+      const filteredCanvas = applyFilter(cropCanvas, currentFilter);
       const processedImageUrl = filteredCanvas.toDataURL('image/jpeg', 0.92);
 
       // 3. Small thumbnail
@@ -177,12 +220,25 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
       }
       const thumbnailUrl = thumbCanvas.toDataURL('image/jpeg', 0.85);
 
+      const finalCorners = cropToCorners({
+        x: safeCropX,
+        y: safeCropY,
+        width: safeCropW,
+        height: safeCropH,
+      });
+
       const newPage: ScannedPage = {
         id: `page-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         originalImageUrl: currentImgSrc,
         processedImageUrl,
         thumbnailUrl,
-        corners,
+        corners: finalCorners,
+        cropBox: {
+          x: safeCropX,
+          y: safeCropY,
+          width: safeCropW,
+          height: safeCropH,
+        },
         rotation,
         filter: currentFilter,
         width: filteredCanvas.width,
@@ -197,7 +253,6 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
         onSavePages(allPages);
       } else {
         setCurrentIdx((prev) => prev + 1);
-        setEditorMode('quad');
       }
     } catch (err) {
       console.error('Processing error:', err);
@@ -209,7 +264,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col justify-between overflow-hidden select-none safe-top">
       {/* Top action bar */}
-      <div className="flex items-center justify-between p-3.5 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80">
+      <div className="flex items-center justify-between p-3.5 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80">
         <button
           onClick={onClose}
           className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
@@ -218,33 +273,58 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* View Mode Toggle: Quad vs Flattened Preview */}
-        <div className="flex items-center p-1 rounded-full bg-slate-900 border border-slate-800">
+        {/* Quick Aspect Ratio Presets */}
+        <div className="flex items-center gap-1 p-1 rounded-full bg-slate-900 border border-slate-800">
           <button
-            onClick={() => setEditorMode('quad')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-              editorMode === 'quad'
+            onClick={() => handleSelectRatio('free')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+              selectedRatio === 'free'
                 ? 'bg-sky-500 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
+            title="Freeform rectangular crop"
           >
-            <Crop className="w-3.5 h-3.5" />
-            <span>Crop Quad</span>
+            <CropIcon className="w-3.5 h-3.5" />
+            <span>Free</span>
           </button>
 
           <button
-            onClick={() => {
-              setEditorMode('preview');
-              updateFlattenedPreview();
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-              editorMode === 'preview'
+            onClick={() => handleSelectRatio('a4')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+              selectedRatio === 'a4'
                 ? 'bg-sky-500 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
+            title="Document standard A4 ratio"
           >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Flattened Preview</span>
+            <FileText className="w-3.5 h-3.5" />
+            <span>A4</span>
+          </button>
+
+          <button
+            onClick={() => handleSelectRatio('1:1')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+              selectedRatio === '1:1'
+                ? 'bg-sky-500 text-white shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="1:1 Square ratio"
+          >
+            <Square className="w-3.5 h-3.5" />
+            <span>1:1</span>
+          </button>
+
+          <button
+            onClick={() => handleSelectRatio('4:3')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+              selectedRatio === '4:3'
+                ? 'bg-sky-500 text-white shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="4:3 Standard photo ratio"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>4:3</span>
           </button>
         </div>
 
@@ -258,9 +338,9 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
             <RotateCw className="w-4 h-4" />
           </button>
           <button
-            onClick={handleResetCorners}
+            onClick={handleSelectFullImage}
             className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-            title="Reset to Full Bounds"
+            title="Select Full Image"
           >
             <Maximize2 className="w-4 h-4" />
           </button>
@@ -269,44 +349,19 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
 
       {/* Main Canvas Workspace */}
       <div className="relative flex-1 bg-slate-950 overflow-hidden flex items-center justify-center p-2">
-        {editorMode === 'quad' ? (
-          <>
-            <CropCanvas
-              imageSrc={currentImgSrc}
-              corners={corners}
-              onChangeCorners={setCorners}
-              rotation={rotation}
-            />
+        <CropCanvas
+          imageSrc={currentImgSrc}
+          crop={crop}
+          onChangeCrop={setCrop}
+          aspectRatio={getNumericAspectRatio()}
+        />
 
-            {/* Instruction Tip */}
-            <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none">
-              <span className="px-3.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-[11px] text-slate-200 border border-white/10 shadow-lg">
-                Drag corners to align with document edges • Magnifier loupe auto-zooms
-              </span>
-            </div>
-          </>
-        ) : (
-          <div className="relative max-w-md w-full h-full flex flex-col items-center justify-center p-4">
-            {flattenedPreviewUrl ? (
-              <div className="relative max-h-full max-w-full rounded-2xl overflow-hidden shadow-2xl border border-slate-800 bg-slate-900">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={flattenedPreviewUrl}
-                  alt="Flattened Document Preview"
-                  className="max-h-[65vh] w-auto object-contain rounded-2xl"
-                />
-                <span className="absolute top-2 left-2 px-2.5 py-1 rounded-md bg-black/75 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 border border-emerald-500/30">
-                  ✓ Homography Warp Applied
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin text-sky-400" />
-                <span className="text-xs">Computing perspective rectification...</span>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Intuitive Instruction Hint */}
+        <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none">
+          <span className="px-3.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] text-slate-200 border border-white/10 shadow-lg">
+            Drag corners or edges to crop • Drag inside box to move
+          </span>
+        </div>
       </div>
 
       {/* Bottom controls: Filter selector + Next/Save button */}
@@ -333,7 +388,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
             {isProcessing ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Warping Document...</span>
+                <span>Cropping Document...</span>
               </>
             ) : isLastImage ? (
               <>

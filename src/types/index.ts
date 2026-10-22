@@ -3,6 +3,15 @@ export interface Point {
   y: number;
 }
 
+export interface RectCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type AspectRatioType = 'free' | 'a4' | '1:1' | '4:3' | 'original';
+
 export type FilterType = 'original' | 'magic' | 'bw' | 'grayscale';
 export type DocumentCategory = 'All' | 'Receipts' | 'IDs' | 'Contracts' | 'Notes' | 'General';
 
@@ -11,7 +20,8 @@ export interface ScannedPage {
   originalImageUrl: string;
   processedImageUrl: string;
   thumbnailUrl: string;
-  corners: [Point, Point, Point, Point]; // TL, TR, BR, BL
+  corners?: [Point, Point, Point, Point]; // TL, TR, BR, BL
+  cropBox?: RectCrop;
   rotation: number; // 0, 90, 180, 270
   filter: FilterType;
   ocrText?: string;

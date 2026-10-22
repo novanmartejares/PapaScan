@@ -1,7 +1,85 @@
-import { Point } from '@/types';
+import { Point, RectCrop } from '@/types';
 
 export function distance(p1: Point, p2: Point): number {
   return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+}
+
+/**
+ * Returns a default rectangular crop inset slightly from image bounds
+ */
+export function getDefaultRectCrop(width: number, height: number, insetRatio = 0.05): RectCrop {
+  const insetX = Math.round(width * insetRatio);
+  const insetY = Math.round(height * insetRatio);
+  return {
+    x: insetX,
+    y: insetY,
+    width: Math.max(20, Math.round(width - insetX * 2)),
+    height: Math.max(20, Math.round(height - insetY * 2)),
+  };
+}
+
+/**
+ * Convert a rectangular crop into 4 corner points [TL, TR, BR, BL]
+ */
+export function cropToCorners(crop: RectCrop): [Point, Point, Point, Point] {
+  return [
+    { x: Math.round(crop.x), y: Math.round(crop.y) },
+    { x: Math.round(crop.x + crop.width), y: Math.round(crop.y) },
+    { x: Math.round(crop.x + crop.width), y: Math.round(crop.y + crop.height) },
+    { x: Math.round(crop.x), y: Math.round(crop.y + crop.height) },
+  ];
+}
+
+/**
+ * Convert 4 corner points into bounding rectangular crop
+ */
+export function cornersToCrop(corners: [Point, Point, Point, Point]): RectCrop {
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: Math.round(minX),
+    y: Math.round(minY),
+    width: Math.round(maxX - minX),
+    height: Math.round(maxY - minY),
+  };
+}
+
+/**
+ * Rotates a rectangular crop by 90, 180, or 270 degrees clockwise
+ */
+export function rotateRectCrop(
+  crop: RectCrop,
+  oldWidth: number,
+  oldHeight: number,
+  angle: 90 | 180 | 270 = 90
+): RectCrop {
+  if (angle === 90) {
+    return {
+      x: Math.max(0, Math.round(oldHeight - (crop.y + crop.height))),
+      y: Math.max(0, Math.round(crop.x)),
+      width: Math.round(crop.height),
+      height: Math.round(crop.width),
+    };
+  } else if (angle === 180) {
+    return {
+      x: Math.max(0, Math.round(oldWidth - (crop.x + crop.width))),
+      y: Math.max(0, Math.round(oldHeight - (crop.y + crop.height))),
+      width: Math.round(crop.width),
+      height: Math.round(crop.height),
+    };
+  } else if (angle === 270) {
+    return {
+      x: Math.max(0, Math.round(crop.y)),
+      y: Math.max(0, Math.round(oldWidth - (crop.x + crop.width))),
+      width: Math.round(crop.height),
+      height: Math.round(crop.width),
+    };
+  }
+  return { ...crop };
 }
 
 /**
