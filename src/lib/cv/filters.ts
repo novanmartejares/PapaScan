@@ -330,10 +330,81 @@ export function applyNoShadow(source: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 /**
+ * Unsharp Mask / Sharpening Convolution Filter.
+ * Enhances high-frequency document text edges, counteracts camera motion blur,
+ * and makes printed characters stand out crisp and clear.
+ */
+export function applySharpen(source: HTMLCanvasElement, amount = 0.65): HTMLCanvasElement {
+  const canvas = cloneCanvas(source);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return source;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const srcImgData = ctx.getImageData(0, 0, w, h);
+  const src = srcImgData.data;
+
+  const dstImgData = ctx.createImageData(w, h);
+  const dst = dstImgData.data;
+
+  // 3x3 Sharpen Kernel:
+  // [  0,   -s,   0 ]
+  // [ -s, 1+4s,  -s ]
+  // [  0,   -s,   0 ]
+  const s = amount;
+  const centerWeight = 1.0 + 4.0 * s;
+
+  for (let y = 1; y < h - 1; y++) {
+    const rowOffset = y * w * 4;
+    const rowAbove = (y - 1) * w * 4;
+    const rowBelow = (y + 1) * w * 4;
+
+    for (let x = 1; x < w - 1; x++) {
+      const idx = rowOffset + x * 4;
+      const idxLeft = rowOffset + (x - 1) * 4;
+      const idxRight = rowOffset + (x + 1) * 4;
+      const idxUp = rowAbove + x * 4;
+      const idxDown = rowBelow + x * 4;
+
+      for (let c = 0; c < 3; c++) {
+        const val =
+          src[idx + c] * centerWeight -
+          (src[idxLeft + c] + src[idxRight + c] + src[idxUp + c] + src[idxDown + c]) * s;
+        dst[idx + c] = Math.min(255, Math.max(0, val | 0));
+      }
+      dst[idx + 3] = src[idx + 3]; // Alpha
+    }
+  }
+
+  // Copy borders
+  for (let x = 0; x < w; x++) {
+    const topIdx = x * 4;
+    const bottomIdx = ((h - 1) * w + x) * 4;
+    for (let c = 0; c < 4; c++) {
+      dst[topIdx + c] = src[topIdx + c];
+      dst[bottomIdx + c] = src[bottomIdx + c];
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    const leftIdx = y * w * 4;
+    const rightIdx = (y * w + (w - 1)) * 4;
+    for (let c = 0; c < 4; c++) {
+      dst[leftIdx + c] = src[leftIdx + c];
+      dst[rightIdx + c] = src[rightIdx + c];
+    }
+  }
+
+  ctx.putImageData(dstImgData, 0, 0);
+  return canvas;
+}
+
+/**
  * Filter dispatch helper
  */
 export function applyFilter(source: HTMLCanvasElement, filter: FilterType): HTMLCanvasElement {
   switch (filter) {
+    case 'sharpen':
+      return applySharpen(source);
     case 'magic':
       return applyMagicColor(source);
     case 'noshadow':

@@ -12,7 +12,7 @@ export interface RectCrop {
 
 export type AspectRatioType = 'free' | 'a4' | '1:1' | '4:3' | 'original';
 
-export type FilterType = 'original' | 'magic' | 'noshadow' | 'bw' | 'grayscale';
+export type FilterType = 'original' | 'bw' | 'sharpen' | 'magic' | 'noshadow' | 'grayscale';
 export type DocumentCategory = 'All' | 'Receipts' | 'IDs' | 'Contracts' | 'Notes' | 'General';
 
 export interface WatermarkOptions {

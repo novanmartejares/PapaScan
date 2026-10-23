@@ -241,6 +241,13 @@ export function detectDocumentBounds(
     let maskMaxY = 0;
     let paperPixelCount = 0;
 
+    let minSum = Infinity, maxSum = -Infinity;
+    let minDiff = Infinity, maxDiff = -Infinity;
+    let tlPt: Point = { x: 0, y: 0 };
+    let trPt: Point = { x: detW, y: 0 };
+    let brPt: Point = { x: detW, y: detH };
+    let blPt: Point = { x: 0, y: detH };
+
     for (let y = 4; y < detH - 4; y++) {
       const rowOffset = y * detW;
       for (let x = 4; x < detW - 4; x++) {
@@ -252,6 +259,13 @@ export function detectDocumentBounds(
           if (x > maskMaxX) maskMaxX = x;
           if (y < maskMinY) maskMinY = y;
           if (y > maskMaxY) maskMaxY = y;
+
+          const sum = x + y;
+          const diff = x - y;
+          if (sum < minSum) { minSum = sum; tlPt = { x, y }; }
+          if (sum > maxSum) { maxSum = sum; brPt = { x, y }; }
+          if (diff > maxDiff) { maxDiff = diff; trPt = { x, y }; }
+          if (diff < minDiff) { minDiff = diff; blPt = { x, y }; }
         }
       }
     }
@@ -316,12 +330,40 @@ export function detectDocumentBounds(
       height: origH,
     };
 
-    const detectedCorners: [Point, Point, Point, Point] = [
-      { x: origX, y: origY },
-      { x: origX + origW, y: origY },
-      { x: origX + origW, y: origY + origH },
-      { x: origX, y: origY + origH },
-    ];
+    const isPerspectiveQuadValid =
+      trPt.x > tlPt.x + 15 &&
+      brPt.x > blPt.x + 15 &&
+      blPt.y > tlPt.y + 15 &&
+      brPt.y > trPt.y + 15;
+
+    let detectedCorners: [Point, Point, Point, Point];
+    if (isPerspectiveQuadValid) {
+      detectedCorners = [
+        {
+          x: Math.max(0, Math.min(srcWidth, Math.round(tlPt.x * invScale))),
+          y: Math.max(0, Math.min(srcHeight, Math.round(tlPt.y * invScale))),
+        },
+        {
+          x: Math.max(0, Math.min(srcWidth, Math.round(trPt.x * invScale))),
+          y: Math.max(0, Math.min(srcHeight, Math.round(trPt.y * invScale))),
+        },
+        {
+          x: Math.max(0, Math.min(srcWidth, Math.round(brPt.x * invScale))),
+          y: Math.max(0, Math.min(srcHeight, Math.round(brPt.y * invScale))),
+        },
+        {
+          x: Math.max(0, Math.min(srcWidth, Math.round(blPt.x * invScale))),
+          y: Math.max(0, Math.min(srcHeight, Math.round(blPt.y * invScale))),
+        },
+      ];
+    } else {
+      detectedCorners = [
+        { x: origX, y: origY },
+        { x: origX + origW, y: origY },
+        { x: origX + origW, y: origY + origH },
+        { x: origX, y: origY + origH },
+      ];
+    }
 
     // Compute confidence based on edge contrast and ray agreement
     const confidence = Math.min(

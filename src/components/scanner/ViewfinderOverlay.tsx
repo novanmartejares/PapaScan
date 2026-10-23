@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Sparkles, CheckCircle2, Zap } from 'lucide-react';
+import { Point } from '@/types';
 
 interface ViewfinderOverlayProps {
   aspectRatio?: 'document' | 'id_card';
@@ -11,6 +12,8 @@ interface ViewfinderOverlayProps {
   smartShootEnabled?: boolean;
   autoCapture?: boolean;
   autoCaptureProgress?: number; // 0 to 100
+  liveCorners?: [Point, Point, Point, Point] | null;
+  videoDimensions?: { width: number; height: number };
 }
 
 export const ViewfinderOverlay: React.FC<ViewfinderOverlayProps> = ({
@@ -21,12 +24,64 @@ export const ViewfinderOverlay: React.FC<ViewfinderOverlayProps> = ({
   smartShootEnabled = true,
   autoCapture = false,
   autoCaptureProgress = 0,
+  liveCorners = null,
+  videoDimensions,
 }) => {
   const isIdCard = aspectRatio === 'id_card';
   const hasDetected = isDocumentDetected && smartShootEnabled && !isIdCard;
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6">
+      {/* Real-time live-detected quadrilateral outline */}
+      {liveCorners && videoDimensions && smartShootEnabled && !isIdCard && (
+        <svg
+          viewBox={`0 0 ${videoDimensions.width} ${videoDimensions.height}`}
+          className="absolute inset-0 w-full h-full pointer-events-none z-20"
+          preserveAspectRatio="xMidYMid slice"
+        >
+          {/* Shaded polygon interior */}
+          <polygon
+            points={`${liveCorners[0].x},${liveCorners[0].y} ${liveCorners[1].x},${liveCorners[1].y} ${liveCorners[2].x},${liveCorners[2].y} ${liveCorners[3].x},${liveCorners[3].y}`}
+            fill={
+              autoCapture && autoCaptureProgress > 0
+                ? 'rgba(16, 185, 129, 0.22)'
+                : 'rgba(251, 191, 36, 0.16)'
+            }
+            stroke={autoCapture && autoCaptureProgress > 0 ? '#10b981' : '#f59e0b'}
+            strokeWidth="4"
+            strokeDasharray={autoCapture && autoCaptureProgress > 0 ? 'none' : '10, 6'}
+            className="transition-colors duration-200"
+          />
+
+          {/* 4 Interactive Corner Dots */}
+          {liveCorners.map((pt, idx) => (
+            <g key={idx}>
+              <circle
+                cx={pt.x}
+                cy={pt.y}
+                r="10"
+                fill={autoCapture && autoCaptureProgress > 0 ? '#10b981' : '#f59e0b'}
+                stroke="#ffffff"
+                strokeWidth="2.5"
+                className="animate-pulse"
+              />
+              <circle
+                cx={pt.x}
+                cy={pt.y}
+                r="18"
+                fill="none"
+                stroke={
+                  autoCapture && autoCaptureProgress > 0
+                    ? 'rgba(16, 185, 129, 0.6)'
+                    : 'rgba(251, 191, 36, 0.5)'
+                }
+                strokeWidth="2"
+              />
+            </g>
+          ))}
+        </svg>
+      )}
+
       {/* Target framing box */}
       <div
         className={`relative w-full overflow-hidden shadow-[0_0_0_9999px_rgba(0,0,0,0.58)] transition-all duration-300 rounded-3xl ${

@@ -15,7 +15,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
-import { ScanBatchItem, CaptureMode } from '@/types';
+import { ScanBatchItem, CaptureMode, Point } from '@/types';
 import { compositeIDCardsToA4Page } from '@/lib/cv/id-compositor';
 import { detectDocumentBounds } from '@/lib/cv/document-detector';
 import { ViewfinderOverlay } from './ViewfinderOverlay';
@@ -66,6 +66,16 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   const [isDocumentDetected, setIsDocumentDetected] = useState(false);
   const [autoCapture, setAutoCapture] = useState(true);
   const [autoCaptureProgress, setAutoCaptureProgress] = useState(0);
+
+  // Live document quadrilateral corners & dimensions
+  const [liveCorners, setLiveCorners] = useState<[Point, Point, Point, Point] | null>(null);
+  const [videoDimensions, setVideoDimensions] = useState<{ width: number; height: number }>({
+    width: 1280,
+    height: 720,
+  });
+  const lastCornersRef = useRef<[Point, Point, Point, Point] | null>(null);
+  const steadyCountRef = useRef<number>(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tab: camera vs upload
   const [tab, setTab] = useState<'camera' | 'upload'>('camera');
@@ -133,10 +143,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     };
   }, [isOpen, tab, startCamera]);
 
-  // Real-time live document edge detection on video stream (Document Shoot mode)
+  // Real-time live document edge detection + steady-hold auto-capture
   useEffect(() => {
     if (!cameraActive || !videoRef.current || tab !== 'camera' || !smartShootEnabled) {
       setIsDocumentDetected(false);
+      setLiveCorners(null);
+      setAutoCaptureProgress(0);
+      lastCornersRef.current = null;
+      steadyCountRef.current = 0;
       return;
     }
 
@@ -148,42 +162,59 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         try {
           const detection = detectDocumentBounds(video);
           setIsDocumentDetected(detection.isDocumentDetected);
+
+          if (detection.isDocumentDetected && detection.corners) {
+            setLiveCorners(detection.corners);
+            setVideoDimensions({ width: video.videoWidth, height: video.videoHeight });
+
+            // Check if outline holds steady (same position and size)
+            if (autoCapture && captureMode !== 'id_card' && idCardStep !== 'compositing') {
+              const prev = lastCornersRef.current;
+              if (prev) {
+                // Average Euclidean distance across 4 corners
+                let totalDist = 0;
+                for (let i = 0; i < 4; i++) {
+                  const dx = detection.corners[i].x - prev[i].x;
+                  const dy = detection.corners[i].y - prev[i].y;
+                  totalDist += Math.sqrt(dx * dx + dy * dy);
+                }
+                const avgDist = totalDist / 4;
+
+                // If drift is small (within ~25px in video space), document holds steady
+                if (avgDist < 25) {
+                  steadyCountRef.current++;
+                  const progress = Math.min(100, Math.round((steadyCountRef.current / 4) * 100));
+                  setAutoCaptureProgress(progress);
+
+                  if (steadyCountRef.current >= 4) {
+                    steadyCountRef.current = 0;
+                    setAutoCaptureProgress(0);
+                    captureFrame();
+                  }
+                } else {
+                  steadyCountRef.current = 0;
+                  setAutoCaptureProgress(0);
+                }
+              } else {
+                steadyCountRef.current = 1;
+                setAutoCaptureProgress(25);
+              }
+              lastCornersRef.current = detection.corners;
+            }
+          } else {
+            setLiveCorners(null);
+            steadyCountRef.current = 0;
+            lastCornersRef.current = null;
+            setAutoCaptureProgress(0);
+          }
         } catch {
           // Ignore transient capture hiccups
         }
       }
-    }, 320);
-
-    return () => clearInterval(intervalId);
-  }, [cameraActive, tab, smartShootEnabled]);
-
-  // Hands-Free Auto-Capture stability timer (CamScanner Smart Scan)
-  useEffect(() => {
-    if (
-      !autoCapture ||
-      !isDocumentDetected ||
-      !cameraActive ||
-      tab !== 'camera' ||
-      captureMode === 'id_card' ||
-      idCardStep === 'compositing'
-    ) {
-      setAutoCaptureProgress(0);
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setAutoCaptureProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(timer);
-          captureFrame();
-          return 0;
-        }
-        return prev + 25; // ~1s steady hold to auto-capture
-      });
     }, 250);
 
-    return () => clearInterval(timer);
-  }, [autoCapture, isDocumentDetected, cameraActive, tab, captureMode, idCardStep]);
+    return () => clearInterval(intervalId);
+  }, [cameraActive, tab, smartShootEnabled, autoCapture, captureMode, idCardStep]);
 
   // Reset ID card state when switching modes
   const handleSelectMode = (mode: CaptureMode) => {
@@ -439,6 +470,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               smartShootEnabled={smartShootEnabled}
               autoCapture={autoCapture}
               autoCaptureProgress={autoCaptureProgress}
+              liveCorners={liveCorners}
+              videoDimensions={videoDimensions}
               stepBadge={
                 captureMode === 'id_card'
                   ? idCardStep === 'front'
@@ -518,27 +551,40 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
       {/* Bottom control bar */}
       <div className="relative z-30 p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around max-w-lg mx-auto w-full">
-        {/* Switch to upload */}
+        {/* Choose Photo / File Dropzone button */}
         <button
-          onClick={() => setTab(tab === 'camera' ? 'upload' : 'camera')}
-          className="flex flex-col items-center gap-1 text-slate-300 hover:text-white transition-colors"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex flex-col items-center gap-1 text-slate-300 hover:text-white transition-colors group active:scale-95"
+          title="Choose photo from device storage or gallery"
         >
-          {tab === 'camera' ? (
-            <>
-              <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
-                <Upload className="w-5 h-5" />
-              </div>
-              <span className="text-[11px] font-medium">Upload</span>
-            </>
-          ) : (
-            <>
-              <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
-                <Camera className="w-5 h-5" />
-              </div>
-              <span className="text-[11px] font-medium">Camera</span>
-            </>
-          )}
+          <div className="w-11 h-11 rounded-2xl bg-white/10 group-hover:bg-white/20 border border-white/20 flex items-center justify-center transition-colors">
+            <Upload className="w-5 h-5 text-sky-400" />
+          </div>
+          <span className="text-[11px] font-semibold text-slate-200">Choose Photo</span>
         </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple={captureMode === 'batch'}
+          className="hidden"
+          onChange={(e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            const promises = Array.from(files).map(
+              (file) =>
+                new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => resolve(ev.target?.result as string);
+                  reader.readAsDataURL(file);
+                })
+            );
+            Promise.all(promises).then((dataUrls) => {
+              onCaptureComplete(dataUrls);
+            });
+          }}
+        />
 
         {/* Shutter Button with Auto-Capture circular progress ring */}
         {tab === 'camera' && (

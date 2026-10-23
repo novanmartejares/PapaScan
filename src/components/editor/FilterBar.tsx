@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { FilterType } from '@/types';
-import { Sparkles, Sun, Contrast, Eye, Image as ImageIcon } from 'lucide-react';
+import { Sparkles, Sun, Contrast, Eye, Image as ImageIcon, Zap } from 'lucide-react';
 
 interface FilterBarProps {
   currentFilter: FilterType;
@@ -23,11 +23,25 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     color: string;
   }> = [
     {
-      id: 'magic',
-      label: 'Magic Color',
-      sublabel: 'Vibrant Paper',
-      icon: <Sparkles className="w-4 h-4" />,
-      color: 'from-amber-400 to-sky-400',
+      id: 'original',
+      label: 'Original',
+      sublabel: 'Raw Capture',
+      icon: <ImageIcon className="w-4 h-4" />,
+      color: 'from-sky-400 to-indigo-400',
+    },
+    {
+      id: 'bw',
+      label: 'B&W',
+      sublabel: 'Crisp Document',
+      icon: <Contrast className="w-4 h-4" />,
+      color: 'from-white to-slate-400',
+    },
+    {
+      id: 'sharpen',
+      label: 'Sharpen',
+      sublabel: 'Enhanced Text',
+      icon: <Zap className="w-4 h-4" />,
+      color: 'from-emerald-400 to-teal-400',
     },
     {
       id: 'noshadow',
@@ -37,25 +51,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       color: 'from-amber-300 to-emerald-400',
     },
     {
-      id: 'bw',
-      label: 'Crisp B&W',
-      sublabel: 'Document Clean',
-      icon: <Contrast className="w-4 h-4" />,
-      color: 'from-white to-slate-400',
-    },
-    {
-      id: 'grayscale',
-      label: 'Grayscale',
-      sublabel: 'Smooth Tones',
-      icon: <Eye className="w-4 h-4" />,
-      color: 'from-slate-300 to-slate-600',
-    },
-    {
-      id: 'original',
-      label: 'Original',
-      sublabel: 'Raw Capture',
-      icon: <ImageIcon className="w-4 h-4" />,
-      color: 'from-sky-400 to-indigo-400',
+      id: 'magic',
+      label: 'Magic Color',
+      sublabel: 'Vibrant Paper',
+      icon: <Sparkles className="w-4 h-4" />,
+      color: 'from-amber-400 to-sky-400',
     },
   ];
 
