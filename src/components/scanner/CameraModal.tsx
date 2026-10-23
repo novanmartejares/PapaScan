@@ -14,10 +14,13 @@ import {
   RefreshCw,
   Sparkles,
   Zap,
+  Lock,
+  Crop,
 } from 'lucide-react';
 import { ScanBatchItem, CaptureMode, Point } from '@/types';
 import { compositeIDCardsToA4Page } from '@/lib/cv/id-compositor';
 import { detectDocumentBounds } from '@/lib/cv/document-detector';
+import { warpPerspective } from '@/lib/cv/homography';
 import { ViewfinderOverlay } from './ViewfinderOverlay';
 import { BatchTray } from './BatchTray';
 import { FileUploadDropzone } from './FileUploadDropzone';
@@ -67,6 +70,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   // Smart Document Shoot & Auto-Capture state
   const [smartShootEnabled, setSmartShootEnabled] = useState(true);
   const [isDocumentDetected, setIsDocumentDetected] = useState(false);
+  const [isDocumentLocked, setIsDocumentLocked] = useState(false);
+  const [takeOnlyDocument, setTakeOnlyDocument] = useState(true);
   const [autoCapture, setAutoCapture] = useState(true);
   const [autoCaptureProgress, setAutoCaptureProgress] = useState(0);
 
@@ -76,8 +81,13 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     width: 1280,
     height: 720,
   });
+
+  // Anti-jitter temporal tracking & steady freeze lock refs
+  const smoothedCornersRef = useRef<[Point, Point, Point, Point] | null>(null);
+  const lockedCornersRef = useRef<[Point, Point, Point, Point] | null>(null);
+  const isDocumentLockedRef = useRef<boolean>(false);
+  const steadyFramesRef = useRef<number>(0);
   const lastCornersRef = useRef<[Point, Point, Point, Point] | null>(null);
-  const steadyCountRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tab: camera vs upload
@@ -146,14 +156,17 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     };
   }, [isOpen, tab, startCamera]);
 
-  // Real-time live document edge detection + steady-hold auto-capture
+  // Real-time live document edge detection + anti-jitter smoothing + steady freeze lock
   useEffect(() => {
     if (!cameraActive || !videoRef.current || tab !== 'camera' || !smartShootEnabled) {
       setIsDocumentDetected(false);
+      setIsDocumentLocked(false);
+      isDocumentLockedRef.current = false;
       setLiveCorners(null);
+      smoothedCornersRef.current = null;
+      lockedCornersRef.current = null;
       setAutoCaptureProgress(0);
-      lastCornersRef.current = null;
-      steadyCountRef.current = 0;
+      steadyFramesRef.current = 0;
       return;
     }
 
@@ -164,57 +177,124 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       if (video.readyState >= 2 && video.videoWidth > 40) {
         try {
           const detection = detectDocumentBounds(video);
-          setIsDocumentDetected(detection.isDocumentDetected);
 
           if (detection.isDocumentDetected && detection.corners) {
-            setLiveCorners(detection.corners);
+            const raw = detection.corners;
+            const prev = smoothedCornersRef.current;
             setVideoDimensions({ width: video.videoWidth, height: video.videoHeight });
 
-            // Check if outline holds steady (same position and size)
-            if (autoCapture && captureMode !== 'id_card' && idCardStep !== 'compositing') {
-              const prev = lastCornersRef.current;
-              if (prev) {
-                // Average Euclidean distance across 4 corners
-                let totalDist = 0;
-                for (let i = 0; i < 4; i++) {
-                  const dx = detection.corners[i].x - prev[i].x;
-                  const dy = detection.corners[i].y - prev[i].y;
-                  totalDist += Math.sqrt(dx * dx + dy * dy);
-                }
-                const avgDist = totalDist / 4;
+            if (!prev) {
+              smoothedCornersRef.current = raw;
+              setLiveCorners(raw);
+              setIsDocumentDetected(true);
+              steadyFramesRef.current = 1;
+              return;
+            }
 
-                // If drift is small (within ~25px in video space), document holds steady
-                if (avgDist < 25) {
-                  steadyCountRef.current++;
-                  const progress = Math.min(100, Math.round((steadyCountRef.current / 4) * 100));
-                  setAutoCaptureProgress(progress);
+            // Calculate average corner displacement across all 4 points
+            let avgDist = 0;
+            for (let i = 0; i < 4; i++) {
+              avgDist += Math.hypot(raw[i].x - prev[i].x, raw[i].y - prev[i].y);
+            }
+            avgDist /= 4;
 
-                  if (steadyCountRef.current >= 4) {
-                    steadyCountRef.current = 0;
-                    setAutoCaptureProgress(0);
+            // 1. If document is ALREADY LOCKED:
+            if (isDocumentLockedRef.current) {
+              if (avgDist < 35) {
+                // Hand is holding reasonably steady — KEEP CORNERS 100% FROZEN (ZERO JITTER!)
+                setAutoCaptureProgress(100);
+                steadyFramesRef.current++;
+
+                if (autoCapture && captureMode !== 'id_card' && idCardStep !== 'compositing') {
+                  if (steadyFramesRef.current >= 4) {
+                    steadyFramesRef.current = 0;
                     captureFrame();
                   }
-                } else {
-                  steadyCountRef.current = 0;
-                  setAutoCaptureProgress(0);
                 }
+                return;
               } else {
-                steadyCountRef.current = 1;
-                setAutoCaptureProgress(25);
+                // Large movement broke the lock
+                isDocumentLockedRef.current = false;
+                setIsDocumentLocked(false);
+                lockedCornersRef.current = null;
+                steadyFramesRef.current = 0;
+                setAutoCaptureProgress(0);
               }
-              lastCornersRef.current = detection.corners;
             }
+
+            // 2. If not yet locked: test stability and apply low-pass dampening
+            if (avgDist < 14) {
+              // Very steady hand
+              steadyFramesRef.current++;
+              const progress = Math.min(100, Math.round((steadyFramesRef.current / 3) * 100));
+              setAutoCaptureProgress(progress);
+
+              // Low-pass EMA (85% previous, 15% new)
+              const smoothed: [Point, Point, Point, Point] = [
+                { x: Math.round(prev[0].x * 0.85 + raw[0].x * 0.15), y: Math.round(prev[0].y * 0.85 + raw[0].y * 0.15) },
+                { x: Math.round(prev[1].x * 0.85 + raw[1].x * 0.15), y: Math.round(prev[1].y * 0.85 + raw[1].y * 0.15) },
+                { x: Math.round(prev[2].x * 0.85 + raw[2].x * 0.15), y: Math.round(prev[2].y * 0.85 + raw[2].y * 0.15) },
+                { x: Math.round(prev[3].x * 0.85 + raw[3].x * 0.15), y: Math.round(prev[3].y * 0.85 + raw[3].y * 0.15) },
+              ];
+              smoothedCornersRef.current = smoothed;
+              setLiveCorners(smoothed);
+
+              if (steadyFramesRef.current >= 3) {
+                // DOCUMENT LOCKED!
+                isDocumentLockedRef.current = true;
+                setIsDocumentLocked(true);
+                lockedCornersRef.current = smoothed;
+                if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                  navigator.vibrate(25);
+                }
+                if (autoCapture && captureMode !== 'id_card' && idCardStep !== 'compositing') {
+                  captureFrame();
+                }
+              }
+            } else if (avgDist < 45) {
+              // Moderate movement (panning/repositioning)
+              steadyFramesRef.current = 0;
+              setAutoCaptureProgress(0);
+              setIsDocumentLocked(false);
+              isDocumentLockedRef.current = false;
+              lockedCornersRef.current = null;
+
+              const smoothed: [Point, Point, Point, Point] = [
+                { x: Math.round(prev[0].x * 0.65 + raw[0].x * 0.35), y: Math.round(prev[0].y * 0.65 + raw[0].y * 0.35) },
+                { x: Math.round(prev[1].x * 0.65 + raw[1].x * 0.35), y: Math.round(prev[1].y * 0.65 + raw[1].y * 0.35) },
+                { x: Math.round(prev[2].x * 0.65 + raw[2].x * 0.35), y: Math.round(prev[2].y * 0.65 + raw[2].y * 0.35) },
+                { x: Math.round(prev[3].x * 0.65 + raw[3].x * 0.35), y: Math.round(prev[3].y * 0.65 + raw[3].y * 0.35) },
+              ];
+              smoothedCornersRef.current = smoothed;
+              setLiveCorners(smoothed);
+            } else {
+              // Large movement
+              steadyFramesRef.current = 0;
+              setAutoCaptureProgress(0);
+              setIsDocumentLocked(false);
+              isDocumentLockedRef.current = false;
+              lockedCornersRef.current = null;
+              smoothedCornersRef.current = raw;
+              setLiveCorners(raw);
+            }
+
+            setIsDocumentDetected(true);
           } else {
+            // Document lost
             setLiveCorners(null);
-            steadyCountRef.current = 0;
-            lastCornersRef.current = null;
+            smoothedCornersRef.current = null;
+            lockedCornersRef.current = null;
+            isDocumentLockedRef.current = false;
+            setIsDocumentLocked(false);
+            steadyFramesRef.current = 0;
             setAutoCaptureProgress(0);
+            setIsDocumentDetected(false);
           }
         } catch {
           // Ignore transient capture hiccups
         }
       }
-    }, 250);
+    }, 200);
 
     return () => clearInterval(intervalId);
   }, [cameraActive, tab, smartShootEnabled, autoCapture, captureMode, idCardStep]);
@@ -271,27 +351,42 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     if (!ctx) return;
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    const fullCameraDataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-    // Run document edge detection on the captured full-res frame or map from live corners
-    let detectedCornersForHandoff: [Point, Point, Point, Point] | undefined = undefined;
-    const hiResDetection = detectDocumentBounds(canvas);
-    if (hiResDetection.isDocumentDetected && hiResDetection.corners) {
-      detectedCornersForHandoff = hiResDetection.corners;
-    } else if (liveCorners) {
+    // Determine target document corners from locked state, live tracking, or hi-res detector
+    let targetCorners: [Point, Point, Point, Point] | undefined = undefined;
+    const activeCorners = lockedCornersRef.current || liveCorners;
+    if (activeCorners) {
       const scaleX = canvas.width / (videoDimensions.width || canvas.width);
       const scaleY = canvas.height / (videoDimensions.height || canvas.height);
-      detectedCornersForHandoff = liveCorners.map((p) => ({
+      targetCorners = activeCorners.map((p) => ({
         x: Math.round(p.x * scaleX),
         y: Math.round(p.y * scaleY),
       })) as [Point, Point, Point, Point];
+    } else {
+      const hiResDetection = detectDocumentBounds(canvas);
+      if (hiResDetection.isDocumentDetected && hiResDetection.corners) {
+        targetCorners = hiResDetection.corners;
+      }
+    }
+
+    // USER REQUIREMENT:
+    // "WHEN THE DOCUMENT IS LOCKED AND EDGE ARE SEEN, IT MUST TAKE ONLY THE DOCUMENT NOT THE ENTIRE SHOT OF THE CAMERA"
+    let deliveredImageUrl = fullCameraDataUrl;
+    if (takeOnlyDocument && targetCorners) {
+      try {
+        const warpedDocCanvas = warpPerspective(canvas, targetCorners);
+        deliveredImageUrl = warpedDocCanvas.toDataURL('image/jpeg', 0.95);
+      } catch (err) {
+        console.warn('Auto-warp perspective error on capture:', err);
+      }
     }
 
     // Flow 1: ID Card Dual-Sided Mode
     if (captureMode === 'id_card') {
       if (idCardStep === 'front') {
         // Front captured -> prompt for back side
-        setIdFrontImage(dataUrl);
+        setIdFrontImage(deliveredImageUrl);
         setIdCardStep('back');
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
           navigator.vibrate([40, 60, 40]);
@@ -300,13 +395,13 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         // Back captured -> auto composite into single A4 page
         setIdCardStep('compositing');
         try {
-          const a4Composite = await compositeIDCardsToA4Page(idFrontImage, dataUrl);
+          const a4Composite = await compositeIDCardsToA4Page(idFrontImage, deliveredImageUrl);
           // Pass composite A4 page to app
           onCaptureComplete([a4Composite.processedImageUrl]);
         } catch (err) {
           console.error('ID Card composite error:', err);
           // Fallback: pass both pages
-          onCaptureComplete([idFrontImage, dataUrl]);
+          onCaptureComplete([idFrontImage, deliveredImageUrl]);
         } finally {
           setIdCardStep('front');
           setIdFrontImage(null);
@@ -319,9 +414,9 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     if (captureMode === 'batch') {
       const newItem: ScanBatchItem = {
         id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        rawImage: dataUrl,
+        rawImage: deliveredImageUrl,
         timestamp: Date.now(),
-        detectedCorners: detectedCornersForHandoff,
+        detectedCorners: targetCorners,
       };
       setBatchItems((prev) => [...prev, newItem]);
       return;
@@ -329,8 +424,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     // Flow 3: Single Mode
     onCaptureComplete(
-      [dataUrl],
-      detectedCornersForHandoff ? [detectedCornersForHandoff] : undefined
+      [deliveredImageUrl],
+      targetCorners ? [targetCorners] : undefined
     );
   };
 
@@ -422,6 +517,20 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
         {/* Quick controls */}
         <div className="flex items-center gap-1.5">
+          {/* Take Document Only Toggle */}
+          <button
+            onClick={() => setTakeOnlyDocument((prev) => !prev)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full backdrop-blur-md border text-xs font-bold transition-all ${
+              takeOnlyDocument
+                ? 'bg-emerald-500/25 border-emerald-400/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                : 'bg-black/50 border-white/10 text-white/50'
+            }`}
+            title="When active, takes strictly the isolated document without desk or room background"
+          >
+            <Crop className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Only Doc</span>
+          </button>
+
           {/* Smart Document Shoot Toggle */}
           {captureMode !== 'id_card' && (
             <button
@@ -494,6 +603,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             <ViewfinderOverlay
               aspectRatio={captureMode === 'id_card' ? 'id_card' : 'document'}
               isDocumentDetected={isDocumentDetected}
+              isDocumentLocked={isDocumentLocked}
+              takeOnlyDocument={takeOnlyDocument}
               smartShootEnabled={smartShootEnabled}
               autoCapture={autoCapture}
               autoCaptureProgress={autoCaptureProgress}
@@ -643,16 +754,26 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             <button
               onClick={captureFrame}
               disabled={idCardStep === 'compositing'}
-              className="group relative w-20 h-20 rounded-full border-4 border-white/80 p-1 flex items-center justify-center active:scale-90 transition-transform shadow-2xl"
+              className={`group relative w-20 h-20 rounded-full border-4 p-1 flex items-center justify-center active:scale-90 transition-all shadow-2xl ${
+                isDocumentLocked
+                  ? 'border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.7)] scale-105'
+                  : 'border-white/80'
+              }`}
               aria-label="Capture photo"
             >
               <div
                 className={`w-full h-full rounded-full transition-colors flex items-center justify-center shadow-lg ${
-                  captureMode === 'id_card'
+                  isDocumentLocked
+                    ? 'bg-gradient-to-tr from-emerald-500 to-teal-400'
+                    : captureMode === 'id_card'
                     ? 'bg-gradient-to-tr from-indigo-500 to-sky-400 group-hover:from-indigo-400 group-hover:to-sky-300'
                     : 'bg-white group-hover:bg-sky-400'
                 }`}
-              />
+              >
+                {isDocumentLocked && (
+                  <Lock className="w-6 h-6 text-white animate-pulse" />
+                )}
+              </div>
             </button>
           </div>
         )}

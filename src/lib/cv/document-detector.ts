@@ -379,55 +379,71 @@ function fitLineRansac(
   maxIterations = 60,
   threshold = 3.5
 ): LineEquation | null {
-  if (points.length < 4) return null;
+  const n = points.length;
+  if (n < 4) return null;
 
   let bestLine: LineEquation | null = null;
   let maxInliers = 0;
   let bestInlierIndices: number[] = [];
 
-  for (let iter = 0; iter < maxIterations; iter++) {
-    const i1 = Math.floor(Math.random() * points.length);
-    const i2 = Math.floor(Math.random() * points.length);
-    if (i1 === i2) continue;
+  // Deterministic distributed strides across point sequence (eliminates random sampling jitter)
+  const strides = [
+    Math.max(1, Math.floor(n * 0.5)),
+    Math.max(1, Math.floor(n * 0.33)),
+    Math.max(1, Math.floor(n * 0.67)),
+    Math.max(1, Math.floor(n * 0.25)),
+    Math.max(1, Math.floor(n * 0.75)),
+    Math.max(1, Math.floor(n * 0.4)),
+    Math.max(1, Math.floor(n * 0.6)),
+  ];
 
-    const p1 = points[i1];
-    const p2 = points[i2];
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const dist = Math.hypot(dx, dy);
+  let iterationsRun = 0;
+  for (const stride of strides) {
+    for (let i = 0; i < n; i++) {
+      if (iterationsRun >= maxIterations) break;
+      const j = (i + stride) % n;
+      iterationsRun++;
 
-    if (dist < dimLimit * 0.10) continue;
+      const p1 = points[i];
+      const p2 = points[j];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const dist = Math.hypot(dx, dy);
 
-    // Reject lines that violate expected document edge orientation
-    if (isVertical) {
-      // Left and Right edges are predominantly vertical (|dx / dy| <= 0.75)
-      if (Math.abs(dy) < 5 || Math.abs(dx / dy) > 0.75) continue;
-    } else {
-      // Top and Bottom edges are predominantly horizontal (|dy / dx| <= 0.75)
-      if (Math.abs(dx) < 5 || Math.abs(dy / dx) > 0.75) continue;
-    }
+      if (dist < dimLimit * 0.10) continue;
 
-    const a = -dy / dist;
-    const b = dx / dist;
-    const c = -(a * p1.x + b * p1.y);
+      // Reject lines that violate expected document edge orientation
+      if (isVertical) {
+        // Left and Right edges are predominantly vertical (|dx / dy| <= 0.75)
+        if (Math.abs(dy) < 5 || Math.abs(dx / dy) > 0.75) continue;
+      } else {
+        // Top and Bottom edges are predominantly horizontal (|dy / dx| <= 0.75)
+        if (Math.abs(dx) < 5 || Math.abs(dy / dx) > 0.75) continue;
+      }
 
-    let inlierCount = 0;
-    const inliers: number[] = [];
+      const a = -dy / dist;
+      const b = dx / dist;
+      const c = -(a * p1.x + b * p1.y);
 
-    for (let j = 0; j < points.length; j++) {
-      const pt = points[j];
-      const d = Math.abs(a * pt.x + b * pt.y + c);
-      if (d <= threshold) {
-        inlierCount++;
-        inliers.push(j);
+      let inlierCount = 0;
+      const inliers: number[] = [];
+
+      for (let k = 0; k < n; k++) {
+        const pt = points[k];
+        const d = Math.abs(a * pt.x + b * pt.y + c);
+        if (d <= threshold) {
+          inlierCount++;
+          inliers.push(k);
+        }
+      }
+
+      if (inlierCount > maxInliers) {
+        maxInliers = inlierCount;
+        bestLine = { a, b, c };
+        bestInlierIndices = inliers;
       }
     }
-
-    if (inlierCount > maxInliers) {
-      maxInliers = inlierCount;
-      bestLine = { a, b, c };
-      bestInlierIndices = inliers;
-    }
+    if (iterationsRun >= maxIterations) break;
   }
 
   if (!bestLine || maxInliers < Math.max(3, points.length * 0.22)) {
