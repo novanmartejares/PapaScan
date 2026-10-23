@@ -27,6 +27,7 @@ interface CropEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
   rawImages: string[];
+  initialCorners?: [Point, Point, Point, Point][];
   initialFilter?: FilterType;
   onSavePages: (pages: ScannedPage[]) => void;
 }
@@ -35,6 +36,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
   isOpen,
   onClose,
   rawImages,
+  initialCorners,
   initialFilter = 'original',
   onSavePages,
 }) => {
@@ -59,6 +61,7 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
+  const [isSmartDetected, setIsSmartDetected] = useState(false);
   const processedPagesRef = useRef<ScannedPage[]>([]);
 
   // Synchronize incoming images
@@ -85,20 +88,28 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
     img.onload = () => {
       setImgDimensions({ width: img.width, height: img.height });
 
-      // Run full-resolution document edge detection
-      const detection = detectDocumentBounds(img);
-      if (detection.isDocumentDetected && detection.corners) {
-        setCorners(detection.corners);
+      // If initial detected corners were passed (e.g. from live camera capture), use them directly
+      if (initialCorners && initialCorners[currentIdx]) {
+        setCorners(initialCorners[currentIdx]);
+        setIsSmartDetected(true);
       } else {
-        const defaultQuad = getDefaultCorners(img.width, img.height, 0.05);
-        setCorners(defaultQuad);
+        // Run full-resolution document edge detection
+        const detection = detectDocumentBounds(img);
+        if (detection.isDocumentDetected && detection.corners) {
+          setCorners(detection.corners);
+          setIsSmartDetected(true);
+        } else {
+          const defaultQuad = getDefaultCorners(img.width, img.height, 0.12);
+          setCorners(defaultQuad);
+          setIsSmartDetected(false);
+        }
       }
 
       setRotation(0);
       setCurrentFilter(initialFilter);
     };
     img.src = currentImgSrc;
-  }, [isOpen, currentIdx, imagesList, initialFilter]);
+  }, [isOpen, currentIdx, imagesList, initialCorners, initialFilter]);
 
   if (!isOpen || imagesList.length === 0) return null;
 
@@ -116,8 +127,10 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
       const detection = detectDocumentBounds(img);
       if (detection.isDocumentDetected && detection.corners) {
         setCorners(detection.corners);
+        setIsSmartDetected(true);
       } else {
-        setCorners(getDefaultCorners(img.width, img.height, 0.04));
+        setCorners(getDefaultCorners(img.width, img.height, 0.12));
+        setIsSmartDetected(false);
       }
       setIsAutoDetecting(false);
 
@@ -366,31 +379,40 @@ export const CropEditorModal: React.FC<CropEditorModalProps> = ({
           </div>
         )}
 
-        {/* Toolbar Floating Controls (Auto-Detect, Full Reset) */}
+        {/* Toolbar Floating Controls (Auto-Detect, Full Reset, Status Badge) */}
         {editorMode === 'quad' && (
-          <div className="absolute top-3 left-4 z-20 flex items-center gap-2">
-            <button
-              onClick={handleSmartAutoDetect}
-              disabled={isAutoDetecting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-md border border-emerald-400/50 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition-all shadow-lg active:scale-95 disabled:opacity-50"
-              title="Auto-detect paper boundaries"
-            >
-              {isAutoDetecting ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              )}
-              <span>Auto-Detect</span>
-            </button>
+          <div className="absolute top-3 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <button
+                onClick={handleSmartAutoDetect}
+                disabled={isAutoDetecting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-md border border-emerald-400/50 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                title="Auto-detect paper boundaries"
+              >
+                {isAutoDetecting ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span>Auto-Detect</span>
+              </button>
 
-            <button
-              onClick={handleResetFull}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/10 text-slate-300 text-xs font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-lg active:scale-95"
-              title="Reset corners to full bounds"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-              <span>Full Sheet</span>
-            </button>
+              <button
+                onClick={handleResetFull}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/10 text-slate-300 text-xs font-semibold hover:text-white hover:bg-slate-800 transition-all shadow-lg active:scale-95"
+                title="Reset corners to full bounds"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>Full Sheet</span>
+              </button>
+            </div>
+
+            {isSmartDetected && (
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 backdrop-blur-md border border-emerald-400/30 text-[11px] font-semibold text-emerald-300 shadow-lg pointer-events-auto">
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span>Document Isolated • Desk Trimmed</span>
+              </div>
+            )}
           </div>
         )}
       </div>

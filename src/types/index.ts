@@ -74,6 +74,7 @@ export interface ScanBatchItem {
   id: string;
   rawImage: string;
   timestamp: number;
+  detectedCorners?: [Point, Point, Point, Point];
 }
 
 export interface PDFExportOptions {

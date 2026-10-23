@@ -8,6 +8,7 @@ import {
   ViewMode,
   FilterType,
   CaptureMode,
+  Point,
 } from '@/types';
 import {
   initDatabase,
@@ -58,6 +59,7 @@ export default function HomePage() {
 
   // Crop editor inputs
   const [pendingRawImages, setPendingRawImages] = useState<string[]>([]);
+  const [pendingCorners, setPendingCorners] = useState<[Point, Point, Point, Point][] | undefined>(undefined);
   const [targetDocIdForAppend, setTargetDocIdForAppend] = useState<string | null>(null);
   const [editingPageIndex, setEditingPageIndex] = useState<number | null>(null);
 
@@ -134,11 +136,15 @@ export default function HomePage() {
   }, [documents, activeDocumentId]);
 
   // Handle camera capture or upload files
-  const handleCaptureComplete = (images: string[]) => {
+  const handleCaptureComplete = (
+    images: string[],
+    initialCorners?: [Point, Point, Point, Point][]
+  ) => {
     setIsCameraOpen(false);
     if (images.length === 0) return;
 
     setPendingRawImages(images);
+    setPendingCorners(initialCorners);
     setIsCropEditorOpen(true);
   };
 
@@ -560,9 +566,11 @@ export default function HomePage() {
         onClose={() => {
           setIsCropEditorOpen(false);
           setPendingRawImages([]);
+          setPendingCorners(undefined);
           setTargetDocIdForAppend(null);
         }}
         rawImages={pendingRawImages}
+        initialCorners={pendingCorners}
         initialFilter={defaultFilter}
         onSavePages={handleSavePagesFromEditor}
       />

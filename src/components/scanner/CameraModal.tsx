@@ -25,7 +25,10 @@ import { FileUploadDropzone } from './FileUploadDropzone';
 interface CameraModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCaptureComplete: (images: string[]) => void;
+  onCaptureComplete: (
+    images: string[],
+    detectedCorners?: [Point, Point, Point, Point][]
+  ) => void;
   initialCaptureMode?: CaptureMode;
 }
 
@@ -270,6 +273,20 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
+    // Run document edge detection on the captured full-res frame or map from live corners
+    let detectedCornersForHandoff: [Point, Point, Point, Point] | undefined = undefined;
+    const hiResDetection = detectDocumentBounds(canvas);
+    if (hiResDetection.isDocumentDetected && hiResDetection.corners) {
+      detectedCornersForHandoff = hiResDetection.corners;
+    } else if (liveCorners) {
+      const scaleX = canvas.width / (videoDimensions.width || canvas.width);
+      const scaleY = canvas.height / (videoDimensions.height || canvas.height);
+      detectedCornersForHandoff = liveCorners.map((p) => ({
+        x: Math.round(p.x * scaleX),
+        y: Math.round(p.y * scaleY),
+      })) as [Point, Point, Point, Point];
+    }
+
     // Flow 1: ID Card Dual-Sided Mode
     if (captureMode === 'id_card') {
       if (idCardStep === 'front') {
@@ -304,21 +321,31 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         rawImage: dataUrl,
         timestamp: Date.now(),
+        detectedCorners: detectedCornersForHandoff,
       };
       setBatchItems((prev) => [...prev, newItem]);
       return;
     }
 
     // Flow 3: Single Mode
-    onCaptureComplete([dataUrl]);
+    onCaptureComplete(
+      [dataUrl],
+      detectedCornersForHandoff ? [detectedCornersForHandoff] : undefined
+    );
   };
 
   // Complete batch scan
   const handleFinishBatch = () => {
     if (batchItems.length === 0) return;
     const images = batchItems.map((item) => item.rawImage);
+    const cornersList = batchItems
+      .map((item) => item.detectedCorners)
+      .filter(Boolean) as [Point, Point, Point, Point][];
     setBatchItems([]);
-    onCaptureComplete(images);
+    onCaptureComplete(
+      images,
+      cornersList.length === images.length ? cornersList : undefined
+    );
   };
 
   // Handle files selected via file uploader
